@@ -1,0 +1,27 @@
+# Arquivos de ambiente e senhas
+.env
+*.env
+*.secret
+*.pem
+*.key
+*.crt
+
+# Dados de dados e volumes (nunca commitar dados de containers)
+data/
+work/
+conf/
+letsencrypt/
+db/
+redis/
+app/
+
+# Sistema Operacional e IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Chaves SSH e credenciais
+id_rsa
+id_rsa.pub
+*.pub
