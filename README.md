@@ -29,8 +29,8 @@ English | [Português](#versão-em-português)
 | **Nginx Proxy Manager** | Reverse Proxy & SSL Management | `:80` / `:443` / `:81` | Active |
 | **Nextcloud Stack** | Cloud Storage (MariaDB + Redis) | `:8085` | Active |
 | **Jellyfin** | Media Streaming Server | `:8096` | Planned |
-| **Grafana + Prometheus** | System Metrics & Telemetry | `:3000` | Planned |
-| **Cloudflare Tunnel** | Zero-Trust Web Publishing | Domain Routing | Planned |
+| **Grafana + Prometheus** | System Metrics & Telemetry | `:3000` | Active |
+| **Cloudflare Tunnel** | Zero-Trust Web Publishing | Domain Routing | Active |
 
 ---
 
@@ -40,6 +40,7 @@ English | [Português](#versão-em-português)
 .
 ├── README.md                    # Project documentation (English / Portuguese)
 ├── historicoCompleto.md         # Detailed session-by-session development logs
+├── comandosUteis.md            # Quick terminal command cheat sheet
 ├── docker/                      # Sanitized Docker Compose templates
 │   ├── adguard/
 │   │   └── docker-compose.yml
@@ -70,9 +71,10 @@ English | [Português](#versão-em-português)
 - [x] Nextcloud stack initialization with MariaDB relational database and Redis cache
 
 ### Phase 3: Extended Services (In Progress)
+- [x] Grafana and Prometheus monitoring integration
+- [x] Cloudflare Tunnel provisioning for HTTPS domain routing
+- [ ] Personal Portfolio deployment on root domain (`ebls.com.br`)
 - [ ] Jellyfin Media Server deployment
-- [ ] Grafana and Prometheus monitoring integration
-- [ ] Cloudflare Tunnel provisioning for HTTPS domain routing
 
 ---
 
@@ -121,8 +123,8 @@ For detailed session logs and implementation history, refer to [historicoComplet
 | **Nginx Proxy Manager** | Proxy Reverso e SSL | `:80` / `:443` / `:81` | Ativo |
 | **Nextcloud Stack** | Armazenamento (MariaDB + Redis) | `:8085` | Ativo |
 | **Jellyfin** | Servidor de Mídia | `:8096` | Planejado |
-| **Grafana + Prometheus** | Telemetria e Métricas | `:3000` | Planejado |
-| **Cloudflare Tunnel** | Exposição Web Zero-Trust | Roteamento de Domínio | Planejado |
+| **Grafana + Prometheus** | Telemetria e Métricas | `:3000` | Ativo |
+| **Cloudflare Tunnel** | Exposição Web Zero-Trust | Roteamento de Domínio | Ativo |
 
 ---
 
@@ -141,9 +143,10 @@ For detailed session logs and implementation history, refer to [historicoComplet
 - [x] Inicialização do Nextcloud com banco de dados MariaDB e cache Redis em `/data`
 
 #### Fase 3: Serviços Extras (Em Andamento)
+- [x] Integração do Grafana + Prometheus
+- [x] Configuração do Cloudflare Tunnel para HTTPS público
+- [ ] Implantação e publicação do Portfólio Pessoal em `ebls.com.br`
 - [ ] Implantação do Jellyfin Media Server
-- [ ] Integração do Grafana + Prometheus
-- [ ] Configuração do Cloudflare Tunnel para HTTPS público
 
 ---
 
