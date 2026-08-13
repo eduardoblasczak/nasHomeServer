@@ -49,6 +49,8 @@ Guia rápido de referência com os comandos mais utilizados para administração
 | **Liberar uma nova porta no Firewall (ex: 8096)** | `sudo ufw allow 8096/tcp` |
 | **Ver todas as portas em escuta no servidor** | `sudo ss -tulpn` |
 | **Testar se o bloqueador DNS AdGuard está respondendo localmente** | `dig @127.0.0.1 google.com` |
+| **Ver logs do Cloudflare Tunnel em tempo real** | `docker logs -f cloudflared` |
+| **Reiniciar o container do Cloudflare Tunnel** | `docker restart cloudflared` |
 
 ---
 
