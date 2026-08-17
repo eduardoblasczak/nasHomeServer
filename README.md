@@ -39,8 +39,7 @@ English | [Português](#versão-em-português)
 ```text
 .
 ├── README.md                    # Project documentation (English / Portuguese)
-├── historicoCompleto.md         # Detailed session-by-session development logs
-├── comandosUteis.md            # Quick terminal command cheat sheet
+├── comandosUteis.md             # Quick terminal command cheat sheet
 ├── docker/                      # Sanitized Docker Compose templates
 │   ├── adguard/
 │   │   └── docker-compose.yml
@@ -90,8 +89,7 @@ This repository is sanitized and safe for public distribution:
 - Secret management via environment variables (`.env`).
 - Excluded persistent data directories, SSL keys, and local credentials via `.gitignore`.
 - Anonymized network IP addresses and internal configuration hostnames.
-
-For detailed session logs and implementation history, refer to [historicoCompleto.md](historicoCompleto.md).
+- Detailed session logs are kept in a private local file, outside version control.
 
 ---
 
@@ -162,5 +160,4 @@ Este repositório é higienizado e seguro para publicação:
 - Gestão de credenciais através de variáveis de ambiente (`.env`).
 - Exclusão de diretórios de dados, chaves SSL e credenciais locais via `.gitignore`.
 - Endereços IP e nomes de host internos anonimizados.
-
-Para consultar o registro de bordo detalhado de cada sessão, veja [historicoCompleto.md](historicoCompleto.md).
+- O registro de bordo detalhado é mantido em arquivo local privado, fora do controle de versão.
