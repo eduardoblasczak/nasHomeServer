@@ -26,4 +26,8 @@ id_rsa
 id_rsa.pub
 *.pub
 
+# Registro de bordo privado
 historicoCompleto.md
+
+# Portfolio pessoal (mantido fora deste repositorio)
+docker/portfolio/

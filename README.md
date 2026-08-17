@@ -44,6 +44,12 @@ English | [Português](#versão-em-português)
 ├── docker/                      # Sanitized Docker Compose templates
 │   ├── adguard/
 │   │   └── docker-compose.yml
+│   ├── cloudflare/
+│   │   ├── docker-compose.yml
+│   │   └── .env.example
+│   ├── monitoring/
+│   │   ├── docker-compose.yml
+│   │   └── prometheus.yml
 │   ├── nginx-proxy-manager/
 │   │   └── docker-compose.yml
 │   └── nextcloud/
