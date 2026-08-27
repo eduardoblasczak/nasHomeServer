@@ -35,3 +35,9 @@ docker/portfolio/
 draft
 nasFinance
 
+
+# Artefatos de deploy gerados por sessao (scp de imagem/pacote)
+docker/*.tar.gz
+
+# Backups de deploy do projeto Draft - nao sao codigo deste repo
+iso/
