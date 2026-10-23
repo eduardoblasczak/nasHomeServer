@@ -27,6 +27,7 @@ documenta só como ele se encaixa no `nas-server`.
 | Imagem | `docker.io/akitaonrails/ai-memory:latest` (3.2.0 no primeiro deploy) |
 | Dados | `/data/ai-memory` (SSD `sda6`), dono `eduardo` (1000:1000) |
 | Backups | `/data/ai-memory-backups`, cron do `eduardo` às 03:15, 14 snapshots |
+| Cópia fora do NAS | branch `wiki` do repo privado `AI-memory`, a cada 10 min, commits como `eduardoblasczak` (deploy key `~/.ssh/ai-memory-wiki-deploy`) |
 | Hardening | usuário 1000, `cap_drop: ALL`, `no-new-privileges`, `mem_limit: 512m` |
 
 A exceção ao padrão "tudo via Cloudflare Tunnel" é proposital: o wiki
@@ -60,6 +61,4 @@ dois. Não suba outra instância apontando para `/data/ai-memory`.
 
 ## Pendências
 
-- **Espelho do wiki fora do NAS** (`AI_MEMORY_WIKI_REMOTE` + `scripts/60-mirror-wiki.sh`):
-  ainda não configurado. Até lá, wiki e backups ficam no mesmo SSD.
 - **Teste de restauração** dos snapshots (`docs/06-backup-restore.md`).
