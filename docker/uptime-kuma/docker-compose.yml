@@ -1,0 +1,63 @@
+# =============================================================
+# Uptime Kuma — vigia o nas-server de FORA dele
+# =============================================================
+# Roda na VM da Oracle (alias SSH `nasfinance-oracle`), e nao no
+# nas-server, de proposito: um monitor que mora no servidor que vigia
+# morre junto com ele e nunca avisa nada.
+#
+# Sobe com:
+#   cd ~/uptime-kuma
+#   docker compose up -d
+#
+# Acesso a interface: uptime.ebls.com.br, pelo tunel `nasfinance-oracle`
+# e atras do Cloudflare Access. Nenhuma porta e publicada no host.
+# =============================================================
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    restart: unless-stopped
+
+    volumes:
+      # Banco SQLite, configuracao dos monitores e historico. Mesmo padrao
+      # do nasFinance (/opt/nasfinance/postgres): a VM tem um disco so, e
+      # dado de container fica fora do diretorio do compose.
+      - /opt/uptime-kuma:/app/data
+
+    environment:
+      # A VM tem 954 MiB divididos com o nasFinance (app 512M, banco 256M).
+      # Sem teto, o heap do Node cresce ate o limite do container e o
+      # kernel passa a usar swap para o app Java — que e o que trava a tela.
+      NODE_OPTIONS: --max-old-space-size=160
+
+    # Rede compartilhada SO com o cloudflared, que a cria. Nao entra na
+    # rede `nasfinance`: dali o Kuma alcancaria o Postgres na 5432, e um
+    # monitor exposto pela internet nao tem motivo para ver o banco.
+    networks:
+      - tunnel
+
+    # Sem `ports`: o unico caminho ate a interface e o tunel, ja filtrado
+    # pelo Access na borda.
+
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          # Medido em instalacoes com ~10 monitores HTTP: 100-150 MiB.
+          memory: 256M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+networks:
+  # Criada pelo compose do cloudflared (~/nasfinance/cloudflared). A
+  # dependencia e nesse sentido de proposito: o monitor depende da borda,
+  # e nunca o contrario — se o Kuma cair, o nasFinance continua no ar.
+  tunnel:
+    external: true

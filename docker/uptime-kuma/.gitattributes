@@ -1,0 +1,4 @@
+# Tudo aqui roda na VM Linux. Com core.autocrlf=true, o checkout no
+# Windows converteria para CRLF, e o `bash -s` quebraria calado no
+# primeiro `\r` — o exit code continua 0.
+* text=auto eol=lf
