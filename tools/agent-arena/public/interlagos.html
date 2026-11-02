@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interlagos · nas-server</title>
+    <link rel="stylesheet" href="/interlagos.css" />
+  </head>
+  <body>
+    <main class="broadcast">
+      <section class="stage" id="stage" aria-label="Circuito de Interlagos com um carro por container">
+        <canvas id="track"></canvas>
+        <canvas id="race"></canvas>
+
+        <header class="control" aria-label="Direção de prova">
+          <div class="control-title">
+            <strong>INTERLAGOS</strong>
+            <span>nas-server</span>
+            <b id="live" class="live is-off">CONECTANDO</b>
+          </div>
+          <dl class="control-grid">
+            <div><dt>PISTA</dt><dd id="c-temp">–</dd></div>
+            <div><dt>CPU</dt><dd id="c-cpu">–</dd></div>
+            <div><dt>RAM</dt><dd id="c-ram">–</dd></div>
+            <div><dt>SWAP</dt><dd id="c-swap">–</dd></div>
+            <div><dt>DISCO /</dt><dd id="c-root">–</dd></div>
+            <div><dt>/DATA</dt><dd id="c-data">–</dd></div>
+          </dl>
+        </header>
+
+        <div id="flag" class="flag" hidden></div>
+
+        <section class="messages" aria-label="Mensagens da direção de prova">
+          <h2>DIREÇÃO DE PROVA</h2>
+          <ol id="messages"></ol>
+        </section>
+
+        <aside class="legend">
+          <span><b>Mais lento</b> mais CPU e memória</span>
+          <span><b>Na frente</b> quem menos consome</span>
+          <span><b>Rastro</b> rede</span>
+          <span><b>Box</b> atenção</span>
+          <span><b>Muro</b> offline</span>
+        </aside>
+
+        <details class="sim">
+          <summary>Simular</summary>
+          <label>Serviço <select id="sim-target"></select></label>
+          <div class="sim-actions">
+            <button id="sim-restart" type="button">Reinício</button>
+            <button id="sim-cpu" type="button">Pico de CPU</button>
+            <button id="sim-off" type="button">Queda</button>
+            <button id="sim-clear" type="button">Normalizar</button>
+          </div>
+          <p>Só nesta tela. Não toca no servidor.</p>
+        </details>
+
+        <p class="credits">Pista: TUMFTM racetrack-database · Entorno: © colaboradores do OpenStreetMap · Patrocinadores e arquibancadas temporárias são ilustrativos</p>
+        <div id="tip" class="tip" hidden></div>
+      </section>
+
+      <aside class="tower" aria-label="Classificação">
+        <header>
+          <h1>CLASSIFICAÇÃO</h1>
+          <p id="session">Volta de apresentação</p>
+        </header>
+        <div class="tower-head"><span>POS</span><span>SERVIÇO</span><span>CPU</span><span>VOLTAS</span></div>
+        <ol id="rows" class="rows"></ol>
+      </aside>
+    </main>
+    <script type="module" src="/interlagos.js"></script>
+  </body>
+</html>
