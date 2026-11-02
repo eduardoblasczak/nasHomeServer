@@ -23,8 +23,11 @@ services:
     image: nextcloud:latest
     container_name: nextcloud-app
     restart: unless-stopped
+    # Só no gateway do bridge do Docker: o único caminho é o túnel
+    # (cloud.ebls.com.br -> 172.17.0.1:8085). Este arquivo dizia "8085:80"
+    # enquanto o servidor já rodava assim — conferido em 01/11/2026.
     ports:
-      - "8085:80"
+      - "172.17.0.1:8085:80"
     depends_on:
       - db
       - redis
