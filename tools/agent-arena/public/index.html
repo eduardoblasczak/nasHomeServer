@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Arena</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <h1>Agent Arena</h1>
+        <span id="subtitle" class="sub">agentes e serviços, ao vivo</span>
+      </div>
+      <div class="bar-right">
+        <label class="toggle">tema
+          <select id="opt-theme">
+            <option value="arcade">Arcade</option>
+            <option value="engenho">Engenho colonial (histórico)</option>
+            <option value="servidor">Servidor (nas-server)</option>
+          </select>
+        </label>
+        <label class="toggle"><input id="opt-bubbles" type="checkbox" checked /> balões</label>
+        <span id="conn" class="conn is-off">conectando…</span>
+        <span id="clock" class="clock tabular">--:--</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="stage" aria-label="Mapa dos agentes">
+        <canvas id="world"></canvas>
+        <div id="tip" class="tip" hidden></div>
+        <p id="legend" class="legend">
+          Cada personagem é uma sessão ou um subagente do Claude Code. Eles andam até o módulo que estão usando de verdade:
+          editar o frontend leva ao Ateliê, um <code>ssh</code> leva à VM, ler a telemetria leva ao nas-server. Ocioso, senta na fogueira.
+        </p>
+      </section>
+
+      <aside class="side">
+        <section id="history" class="panel history" hidden>
+          <h2>Contexto histórico</h2>
+          <p class="history-lead">
+            Um engenho de açúcar do Brasil colônia. Cada lugar do mapa mostra uma etapa real da produção; passe o mouse para ler.
+          </p>
+          <ol id="facts" class="facts"></ol>
+        </section>
+
+        <section class="panel">
+          <h2>Agentes <span id="agent-count" class="count">0</span></h2>
+          <ul id="agents" class="agents"></ul>
+          <p id="agents-empty" class="empty">Nenhum agente ativo nos últimos 30 minutos.</p>
+        </section>
+
+        <section class="panel">
+          <h2>nas-server <span id="nas-state" class="pill">…</span></h2>
+          <div class="gauges">
+            <div class="gauge"><span>CPU</span><div class="track"><i id="g-cpu"></i></div><b id="v-cpu" class="tabular">–</b></div>
+            <div class="gauge"><span>RAM</span><div class="track"><i id="g-ram"></i></div><b id="v-ram" class="tabular">–</b></div>
+            <div class="gauge"><span>Temp</span><div class="track"><i id="g-temp"></i></div><b id="v-temp" class="tabular">–</b></div>
+          </div>
+          <p id="nas-meta" class="meta"></p>
+          <ul id="containers" class="containers"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Sites</h2>
+          <ul id="sites" class="sites"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Eventos</h2>
+          <ol id="log" class="log"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/game.js"></script>
+  </body>
+</html>
