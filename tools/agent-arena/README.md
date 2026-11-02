@@ -99,9 +99,13 @@ os mesmos dados reais. A escolha fica salva no navegador.
   sem tráfego, fumaça nem faíscas, porque esses números não existem nela. O motivo da falha aparece no terminal do Arena. A origem do tráfego é inferida pelo papel do serviço (o
   cAdvisor só mede o volume), e a dica do mouse deixa isso explícito. `ARENA_PULSE_URL` troca o endereço.
 
-## Interlagos (tela de teste)
+## Interlagos
 
 Em http://127.0.0.1:4580/interlagos.html, com um carro por container e os mesmos dados do modo Servidor.
+A versão normal é em 3D (Three.js); sem WebGL2, ou com `?modo=2d`, entra uma versão 2D de reserva.
+
+Roda do mouse aproxima em direção ao ponteiro, arrastar move, duplo clique volta à vista geral, e clicar em uma
+linha da torre acompanha aquele carro. `?fps` mostra quadros por segundo e o tempo de GPU na tela.
 
 | Na corrida | Medido |
 |---|---|
@@ -115,10 +119,21 @@ Em http://127.0.0.1:4580/interlagos.html, com um carro por container e os mesmos
 | Corrida congelada | Mais da metade fora (a medição parou) ou nenhuma fonte respondendo |
 | Chuva | Swap crescendo ou RAM acima de 85% |
 
-**Fidelidade:** o traçado vem de `build-interlagos.py` (pista medida do TUMFTM, LGPL-3.0, encaixada nas vias do
-OpenStreetMap com erro médio de 3 m). Prédios, lagos e mata são do OpenStreetMap (ODbL). Arquibancadas
-temporárias, tendas e patrocinadores são ilustrativos, e os patrocinadores são os seus próprios projetos, sem marcas
-de terceiros. Os botões "Simular" só mudam a tela. Ainda não existe detecção de vazamento de memória.
+**Como está organizado** (`public/interlagos/`): `circuit.js` é a geometria, `race.js` as regras, `ui.js` os painéis
+em HTML. O desenho fica em `render3d/` (terreno, pista, arredores, carros, câmera e etapa final) e em `render2d.js`.
+
+**Fidelidade:** a pista e o relevo são medidos, e `build-interlagos.py` gera os dados a partir das fontes listadas no
+início dele. O traçado (TUMFTM, LGPL-3.0) é encaixado nas vias do OpenStreetMap com erro médio de 3 m, e o desnível dá
+40,8 m, contra cerca de 43 m oficiais. Prédios, ruas, lagos e mata são do OpenStreetMap (ODbL), e o relevo é SRTM (USGS).
+
+`surfaces.js` traz o que os mapas abertos não têm, como áreas de escape, pátio do paddock e solo exposto: as posições
+foram estimadas olhando a vista aérea, e a imagem em si não é usada na tela. Texturas: Poly Haven (CC0). Three.js: MIT.
+
+**Desempenho:** a sombra, o chão e o céu são cozidos uma vez ao abrir, então cada quadro só lê texturas. Numa RTX 3050
+em 1920x1080, a GPU gasta de 2,5 a 4,5 ms por quadro, dentro dos 6,9 ms dos 144 Hz.
+
+Se o navegador perder o contexto do WebGL (driver reiniciado, volta da suspensão), a página recarrega sozinha. Depois de
+três perdas em 2 minutos, fica na versão 2D.
 
 ## Privacidade
 
