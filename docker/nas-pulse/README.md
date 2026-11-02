@@ -63,10 +63,12 @@ sudo tailscale serve --http=9106 --bg http://127.0.0.1:9106
 No Windows, pela tailnet:
 
 ```powershell
-curl.exe -s -m 5 http://100.97.42.114:9106/healthz
+curl.exe -s -m 5 http://nas-server.tail80d72a.ts.net:9106/healthz
 ```
 
-Tem que responder `ok`. E pela rede local tem que **falhar**:
+Tem que responder `ok`. **Use o nome, não o IP:** o `tailscale serve` escolhe o site
+pelo cabeçalho Host, e pelo IP `100.x` responde `404 page not found` (texto puro, que
+não vem deste serviço). E pela rede local tem que **falhar**:
 
 ```powershell
 curl.exe -s -m 5 http://192.168.15.90:9106/healthz

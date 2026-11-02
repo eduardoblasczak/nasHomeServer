@@ -39,9 +39,9 @@ const TICK_MS = 1500
 const TELEMETRY_URL = 'https://ebls.com.br/api/telemetry'
 const TELEMETRY_EVERY_MS = 20_000
 const SITES_EVERY_MS = 60_000
-// IP da tailnet e não o nome MagicDNS: o DNS da Tailscale já falhou junto com o
-// relógio do servidor, e o mapa precisa continuar mostrando o que der.
-const PULSE_URL = process.env.ARENA_PULSE_URL ?? 'http://100.97.42.114:9106/api/pulse'
+// Pelo nome, e não pelo IP 100.x: o `tailscale serve` escolhe o site pelo cabeçalho
+// Host e responde 404 ao IP. Se o MagicDNS falhar, o mapa cai para a telemetria pública.
+const PULSE_URL = process.env.ARENA_PULSE_URL ?? 'http://nas-server.tail80d72a.ts.net:9106/api/pulse'
 const PULSE_EVERY_MS = 5_000
 
 const SITES = [
@@ -434,6 +434,7 @@ async function pollTelemetry() {
 }
 
 const num = (v) => (Number.isFinite(v) ? v : null)
+let pulseError = null
 
 /** Detalhe por container, só pela tailnet. Falhar aqui é normal fora de casa. */
 async function pollPulse() {
@@ -460,8 +461,14 @@ async function pollPulse() {
     }
     services.pulseOk = Number.isFinite(age) && age < 60_000
     services.pulseMs = Math.round(performance.now() - started)
-  } catch {
+    pulseError = null
+  } catch (error) {
     services.pulseOk = false
+    // Fora de casa falhar é normal, mas o motivo tem que aparecer: um 404 aqui ficou
+    // invisível e parecia falta de tailnet. Registra só quando o motivo muda.
+    const reason = error?.cause?.code ?? error?.message ?? 'erro'
+    if (reason !== pulseError) console.warn(`nas-pulse indisponível (${PULSE_URL}): ${reason}`)
+    pulseError = reason
   }
 }
 
