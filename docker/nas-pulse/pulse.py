@@ -85,6 +85,17 @@ def cpu_temperature():
     return None
 
 
+def recent_rate(metric, sel):
+    """Taxa do último minuto, com 3 minutos de reserva para container ocioso.
+
+    O cAdvisor atualiza menos um container parado: o draft-web teve 8 leituras em 5 min,
+    contra 20 de um container ativo. Com menos de duas leituras em 1 min, o rate() não
+    devolve nada, e CPU e rede sumiam por cerca de 1 min, depois voltavam. Sem o
+    reserva, serviço ocioso parecia "sem dados"; só com 3 min, os picos demorariam a aparecer.
+    """
+    return f"sum by (name) (rate({metric}{sel}[1m])) or sum by (name) (rate({metric}{sel}[3m]))"
+
+
 def containers():
     # `max by (name)` deduplica: ao recriar um container, as séries do ID
     # antigo continuam no Prometheus durante a janela de staleness, e o
@@ -94,11 +105,11 @@ def containers():
     started = by_label(f"max by (name) (container_start_time_seconds{sel})", "name")
     # Percentual de UM núcleo (pode passar de 100 em multithread). O
     # cliente divide pelo número de núcleos do host para comparar.
-    cpu = by_label(f"sum by (name) (rate(container_cpu_usage_seconds_total{sel}[1m])) * 100", "name")
+    cpu = by_label(f"({recent_rate('container_cpu_usage_seconds_total', sel)}) * 100", "name")
     mem = by_label(f"max by (name) (container_memory_working_set_bytes{sel})", "name")
     limit = by_label(f"max by (name) (container_spec_memory_limit_bytes{sel})", "name")
-    rx = by_label(f"sum by (name) (rate(container_network_receive_bytes_total{sel}[1m]))", "name")
-    tx = by_label(f"sum by (name) (rate(container_network_transmit_bytes_total{sel}[1m]))", "name")
+    rx = by_label(recent_rate("container_network_receive_bytes_total", sel), "name")
+    tx = by_label(recent_rate("container_network_transmit_bytes_total", sel), "name")
 
     now = time.time()
     out = []
