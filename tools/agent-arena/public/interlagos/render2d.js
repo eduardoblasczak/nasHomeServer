@@ -1,140 +1,19 @@
-// Interlagos: cada container do nas-server é um carro, numa pista com o traçado medido.
-//   velocidade = peso do serviço (CPU e memória, em escala logarítmica). O seletor da torre
-//                define se quem mais consome anda mais rápido (padrão) ou mais lento
-//   posição    = distância percorrida na sessão
-//   rastro     = rede                              box     = reinício ou comportamento anormal
-//   muro       = offline                           equipe  = sistema ao qual o container pertence
-// Só o que é medido muda o estado dos carros. O cenário do fim de semana é ilustrativo.
+// Versão 2D de reserva: entra quando não há WebGL2, ou com ?modo=2d na URL. Mesmos dados e mesma
+// corrida da versão 3D, desenhados em canvas 2D, sem relevo e sem luz.
 
-import { CIRCUIT } from './interlagos-data.js'
+import { at, CIRCUIT, GARAGES, LENGTH, mod, nearestStation, P, PIT, pitAt, PIT_LENGTH, STEP } from './circuit.js'
+import { packetRate, race, step, TEAMS } from './race.js'
+import { focus, showTip } from './ui.js'
 
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches
 const DEBUG = new URLSearchParams(location.search).has('debug')
-
-// ============================================================ equipes
-
-const TEAMS = {
-  draft: { name: 'Draft', color: '#e8002d' },
-  nextcloud: { name: 'Nextcloud', color: '#1e63d6' },
-  finance: { name: 'nasFinance', color: '#16a34a' },
-  portfolio: { name: 'Portfólio', color: '#f5c518' },
-  voalberto: { name: 'Vô Alberto', color: '#8a3ffc' },
-  monitor: { name: 'Monitoramento', color: '#ff7a00' },
-  infra: { name: 'Infraestrutura', color: '#e9edf2' },
-}
-
-const DRIVERS = {
-  'draft-web': ['DFW', 'draft'], 'draft-app': ['DFA', 'draft'], 'draft-mysql': ['DBD', 'draft'],
-  'nextcloud-app': ['NXC', 'nextcloud'], 'nextcloud-db': ['NXD', 'nextcloud'], 'nextcloud-redis': ['RDS', 'nextcloud'],
-  'nasfinance-app': ['FIN', 'finance'], 'nasfinance-db': ['FDB', 'finance'],
-  'portfolio-web': ['POR', 'portfolio'], 'portfolio-telemetry': ['TEL', 'portfolio'],
-  'voalberto-site': ['VOA', 'voalberto'],
-  prometheus: ['PRM', 'monitor'], grafana: ['GRF', 'monitor'], cadvisor: ['CAD', 'monitor'], 'node-exporter': ['NOD', 'monitor'], 'nas-pulse': ['PLS', 'monitor'],
-  cloudflared: ['CFD', 'infra'], adguardhome: ['ADG', 'infra'], 'nginx-proxy-manager': ['NPM', 'infra'], portainer: ['PTN', 'infra'], 'ai-memory': ['MEM', 'infra'],
-}
-
-const driver = (name) => DRIVERS[name] ?? [name.replace(/[^a-z0-9]/gi, '').slice(0, 3).toUpperCase(), 'infra']
-
-// ============================================================ geometria da pista
-
-const N = CIRCUIT.track.length
-const P = CIRCUIT.track.map(([x, y, a, b]) => ({ x, y, right: a, left: b }))
-const LENGTH = CIRCUIT.length
-const STEP = LENGTH / N
-
-for (let i = 0; i < N; i++) {
-  const a = P[(i - 2 + N) % N]
-  const b = P[(i + 2) % N]
-  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
-  P[i].tx = (b.x - a.x) / len
-  P[i].ty = (b.y - a.y) / len
-}
-for (let i = 0; i < N; i++) {
-  const a = P[(i - 4 + N) % N]
-  const b = P[(i + 4) % N]
-  let delta = Math.atan2(b.ty, b.tx) - Math.atan2(a.ty, a.tx)
-  while (delta > Math.PI) delta -= Math.PI * 2
-  while (delta < -Math.PI) delta += Math.PI * 2
-  P[i].curve = delta / (8 * STEP) // positivo = curva para a esquerda
-}
-
-const mod = (s) => ((s % LENGTH) + LENGTH) % LENGTH
-
-/** Ponto a `d` metros do eixo da pista. d > 0 = esquerda do sentido de percurso. */
-function at(s, d = 0) {
-  const f = mod(s) / STEP
-  const i = Math.floor(f) % N
-  const k = f - Math.floor(f)
-  const a = P[i]
-  const b = P[(i + 1) % N]
-  const tx = a.tx + (b.tx - a.tx) * k
-  const ty = a.ty + (b.ty - a.ty) * k
-  const len = Math.hypot(tx, ty) || 1
-  return { x: a.x + (b.x - a.x) * k - (ty / len) * d, y: a.y + (b.y - a.y) * k + (tx / len) * d, tx: tx / len, ty: ty / len, left: a.left, right: a.right, curve: a.curve }
-}
-
-// Carros tiram o pé nas curvas. A média é normalizada para o tempo de volta valer de verdade.
-const PACE = (() => {
-  const raw = P.map((_, i) => {
-    let c = 0
-    for (let j = -3; j <= 6; j++) c = Math.max(c, Math.abs(P[(i + j + N) % N].curve))
-    return 1 / (0.75 + Math.min(1.6, c * 45))
-  })
-  const smooth = raw.map((_, i) => {
-    let sum = 0
-    for (let j = -6; j <= 6; j++) sum += raw[(i + j + N) % N]
-    return sum / 13
-  })
-  const harmonic = smooth.reduce((sum, v) => sum + 1 / v, 0) / N
-  return smooth.map((v) => v * harmonic)
-})()
-
-// Pit lane real do OpenStreetMap.
-const PIT = []
-for (let i = 0; i < CIRCUIT.pit.length; i += 2) PIT.push({ x: CIRCUIT.pit[i], y: CIRCUIT.pit[i + 1] })
-const nearestStation = (p) => {
-  let best = 0
-  let dist = Infinity
-  for (let i = 0; i < N; i++) {
-    const d = (P[i].x - p.x) ** 2 + (P[i].y - p.y) ** 2
-    if (d < dist) {
-      dist = d
-      best = i
-    }
-  }
-  return best * STEP
-}
-const PIT_IN = nearestStation(PIT[0])
-const PIT_OUT = nearestStation(PIT[PIT.length - 1])
-const pitCum = [0]
-for (let i = 1; i < PIT.length; i++) pitCum.push(pitCum[i - 1] + Math.hypot(PIT[i].x - PIT[i - 1].x, PIT[i].y - PIT[i - 1].y))
-const PIT_LENGTH = pitCum[pitCum.length - 1]
-
-function pitAt(dist) {
-  const d = Math.max(0, Math.min(PIT_LENGTH, dist))
-  let i = 1
-  while (i < pitCum.length - 1 && pitCum[i] < d) i++
-  const a = PIT[i - 1]
-  const b = PIT[i]
-  const seg = pitCum[i] - pitCum[i - 1] || 1
-  const k = (d - pitCum[i - 1]) / seg
-  return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, tx: (b.x - a.x) / seg, ty: (b.y - a.y) / seg }
-}
-
-function cornerName(s) {
-  const i = mod(s) / STEP
-  let name = CIRCUIT.corners[CIRCUIT.corners.length - 1].name
-  for (const c of CIRCUIT.corners) if (c.i <= i) name = c.name
-  return name
-}
+const N = P.length
+let layers = null
+let tick = 0
+let hovered = null
+let stage, trackCanvas, raceCanvas, tctx, ctx
 
 // ============================================================ câmera
-
-const stage = document.getElementById('stage')
-const trackCanvas = document.getElementById('track')
-const raceCanvas = document.getElementById('race')
-const tctx = trackCanvas.getContext('2d')
-const ctx = raceCanvas.getContext('2d')
 
 // Vista olhando para o sul: a reta dos boxes fica no alto da tela e o circuito aproveita
 // a tela larga.
@@ -257,7 +136,7 @@ function paintTrack() {
   g.lineWidth = metres(170)
   g.stroke()
 
-  for (const f of CIRCUIT.grass) {
+  for (const { pts: f } of layers.grass) {
     trace(g, flatPts(f), true)
     g.fillStyle = noiseTile('#688a44', 12)
     g.fill()
@@ -277,7 +156,7 @@ function paintTrack() {
   g.restore()
 
   paintForest(g)
-  for (const w of CIRCUIT.water) {
+  for (const { pts: w } of layers.water) {
     trace(g, flatPts(w), true)
     g.fillStyle = '#31617a'
     g.fill()
@@ -287,7 +166,7 @@ function paintTrack() {
   }
   paintBuildings(g)
 
-  for (const k of CIRCUIT.kart) {
+  for (const { pts: k } of layers.kart) {
     trace(g, flatPts(k))
     g.strokeStyle = '#3b3d3f'
     g.lineWidth = metres(7)
@@ -304,7 +183,7 @@ function paintTrack() {
 }
 
 function paintForest(g) {
-  for (const f of CIRCUIT.forest) {
+  for (const { pts: f } of layers.forest) {
     const pts = flatPts(f)
     g.save()
     trace(g, pts, true)
@@ -329,7 +208,7 @@ function paintForest(g) {
 }
 
 function paintBuildings(g) {
-  for (const b of CIRCUIT.buildings) {
+  for (const { pts: b } of layers.buildings) {
     const pts = flatPts(b)
     g.save()
     g.translate(metres(1.8), metres(2.2))
@@ -345,7 +224,7 @@ function paintBuildings(g) {
     g.lineWidth = 0.6 * view.dpr
     g.stroke()
   }
-  for (const s of CIRCUIT.stands) {
+  for (const { pts: s } of layers.stands) {
     const pts = flatPts(s)
     trace(g, pts, true)
     g.fillStyle = '#d8dbdc'
@@ -481,8 +360,8 @@ function pitNormal(p) {
 
 // As garagens ficam só no trecho paralelo à reta (o pit lane real segue por mais de 600 m
 // até a saída, por dentro do S do Senna e da Curva do Sol).
-const GARAGE_T0 = 170 / PIT_LENGTH
-const GARAGE_T1 = 590 / PIT_LENGTH
+const GARAGE_T0 = GARAGES.from / PIT_LENGTH
+const GARAGE_T1 = GARAGES.to / PIT_LENGTH
 
 const trackDistance = (x, y) => {
   let best = Infinity
@@ -843,301 +722,6 @@ function carSprite(color) {
   return sprite
 }
 
-// ============================================================ estado da corrida
-
-const cars = new Map()
-const messages = []
-const overrides = new Map() // nome -> { up?, cpu?, restart? }: só a simulação
-let host = null
-let pulseState = 'esperando' // tailnet | publica | sem-sinal
-let telemetryLost = false
-let lastPulseAt = null
-let firstAt = null
-let tick = 0
-let hovered = null
-let lastSwap = null
-let rain = 0
-
-const WARMUP_S = 300 // tempo para aprender o normal de cada serviço
-const BOX_MIN_S = 10
-const packetRate = (bps) => (bps ? Math.min(5, Math.log10(1 + bps / 256)) : 0)
-
-/**
- * Peso de 0 a 1: quanto o serviço consome. CPU pesa mais porque muda a cada leitura; memória
- * mexe pouco, mas separa um serviço grande de um pequeno. Log nos dois, senão só o
- * maior consumidor se diferenciaria dos demais.
- */
-function weightOf(d) {
-  const cpu = Math.min(1, Math.log10(1 + Math.max(0, d.cpu ?? 0)) / 2)
-  const mem = Math.min(1, Math.log2(1 + (d.memBytes ?? 0) / (64 * 2 ** 20)) / 4)
-  return 0.7 * cpu + 0.3 * mem
-}
-
-// O que o consumo faz com o carro. A escolha fica salva neste navegador.
-const MODES = {
-  rapido: {
-    title: 'QUEM MAIS CONSOME', speed: 'mais rápido', front: 'quem mais consome',
-    lap: (weight) => 110 * (30 / 110) ** weight, // 110 s sem carga, 30 s no peso máximo
-    grid: (weight) => -weight,
-  },
-  lento: {
-    title: 'QUEM MENOS CONSOME', speed: 'mais lento', front: 'quem menos consome',
-    lap: (weight) => 45 * 4 ** weight, // 45 s sem carga, 180 s no peso máximo
-    grid: (weight) => weight,
-  },
-}
-let mode = 'rapido'
-try {
-  if (MODES[localStorage.getItem('interlagos-modo')]) mode = localStorage.getItem('interlagos-modo')
-} catch {
-  // armazenamento bloqueado: fica o padrão
-}
-
-const lapTime = (weight) => MODES[mode].lap(weight)
-// Sem métrica não há o que classificar: anda no ritmo mais lento do modo e fica atrás dos medidos.
-const slowestLap = () => Math.max(lapTime(0), lapTime(1))
-const gridKey = (data) => (data.cpu == null ? Infinity : MODES[mode].grid(weightOf(data)))
-
-function addMessage(text) {
-  messages.unshift({ at: new Date(), text })
-  messages.length = Math.min(messages.length, 3)
-  const list = document.getElementById('messages')
-  list.replaceChildren(...messages.map((m) => {
-    const li = document.createElement('li')
-    const time = document.createElement('time')
-    time.textContent = m.at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-    const span = document.createElement('span')
-    span.textContent = m.text
-    li.append(time, span)
-    return li
-  }))
-}
-
-function newCar(name, index) {
-  const [code, teamId] = driver(name)
-  const car = {
-    name, code, team: TEAMS[teamId], index,
-    data: { name, up: true },
-    dist: -index * 8, s: mod(-index * 8 - 10), lane: index % 2 ? 3.2 : -3.2, laneTarget: index % 2 ? 3.2 : -3.2,
-    state: 'run', // run | toBox | inPit | out
-    pitDist: 0, boxAt: (170 + (index % 20 + 0.5) * 21) / PIT_LENGTH, // diante da garagem
-    pitUntil: 0, pitReason: '', pitCount: 0,
-    outAt: null, crashT: 0, crashSide: index % 2 ? 1 : -1, crashSpin: (index % 2 ? 1 : -1) * 0.65,
-    speed: 0, weight: null, baseline: null, hot: 0, started: null, x: 0, y: 0, angle: 0,
-  }
-  cars.set(name, car)
-  return car
-}
-
-function applyData(services) {
-  const pulse = services.pulseOk ? services.pulse : null
-  const tel = services.telemetryOk ? services.telemetry : null
-  if (pulse) {
-    pulseState = 'tailnet'
-    host = pulse.host
-  } else if (tel) {
-    pulseState = 'publica'
-    host = { cpu: tel.cpu, ram: tel.ram, temp: tel.temp, disks: [] }
-  } else {
-    pulseState = services.pulseOk === null && services.telemetryOk === null ? 'esperando' : 'sem-sinal'
-  }
-
-  const list = pulse ? pulse.containers : tel ? tel.containers.map((c) => ({ name: c.name, up: c.up, cpu: null })) : null
-  renderControl()
-  if (!list) return
-
-  // Grid inicial: na ordem do modo escolhido; sem métrica, no fim.
-  if (!cars.size) {
-    ;[...list].sort((a, b) => gridKey(a) - gridKey(b)).forEach((c, i) => newCar(c.name, i))
-    firstAt = performance.now()
-    fillSimTargets()
-  }
-
-  const fresh = pulse && pulse.generatedAt !== lastPulseAt
-  if (pulse) lastPulseAt = pulse.generatedAt
-
-  // Nem todos caem juntos: mais da metade fora é a medição que parou (cadvisor ou Prometheus).
-  const seen = new Map(list.map((c) => [c.name, c]))
-  const upCount = list.filter((c) => c.up).length
-  const measuringBroke = pulse && (upCount < cars.size / 2)
-  if (measuringBroke !== telemetryLost) {
-    telemetryLost = measuringBroke
-    if (telemetryLost) addMessage('Telemetria perdida: a medição parou, não os serviços')
-  }
-
-  for (const c of list) if (!cars.has(c.name)) newCar(c.name, cars.size)
-
-  for (const car of cars.values()) {
-    const raw = seen.get(car.name)
-    const sim = overrides.get(car.name)
-    // Um container parado some das métricas depois de alguns minutos: o carro continua no muro.
-    const data = { ...(raw ?? { name: car.name, up: pulse ? false : car.data.up }), ...(sim ?? {}) }
-    car.data = data
-    if (telemetryLost) continue
-
-    if (data.up === false && car.state !== 'out') crash(car)
-    if (data.up !== false && car.state === 'out') {
-      car.state = 'toBox'
-      car.pitReason = 'de volta'
-      addMessage(`${car.code} voltou ao ar: segue para o box`)
-    }
-
-    if (data.startedAt != null) {
-      if (car.started != null && data.startedAt > car.started + 1) sendToBox(car, `reiniciou`)
-      car.started = data.startedAt
-    }
-
-    if ((fresh || sim) && data.cpu != null && data.up !== false) {
-      const warm = firstAt != null && (performance.now() - firstAt) / 1000 > WARMUP_S
-      // Normal de cada serviço: média lenta, que ignora o próprio pico enquanto ele dura.
-      if (car.baseline == null) car.baseline = data.cpu
-      const spiking = data.cpu > Math.max(car.baseline * 3, 5)
-      if (!spiking) car.baseline += (data.cpu - car.baseline) * 0.017
-      car.hot = spiking && (warm || sim?.cpu != null) ? car.hot + 1 : 0
-      if (car.hot >= 2) sendToBox(car, `CPU ${data.cpu.toFixed(0)}%`)
-    }
-    if (data.memLimitBytes && data.memBytes / data.memLimitBytes > 0.85) sendToBox(car, 'memória no limite')
-  }
-
-  // Chuva: o sistema está apelando para o swap, ou a RAM está no limite.
-  if (host?.swap != null) {
-    const growing = lastSwap != null && host.swap > lastSwap + 0.05
-    if (fresh) {
-      rain = Math.max(0, Math.min(1, rain + (growing ? 0.25 : -0.02)))
-      lastSwap = host.swap
-    }
-  }
-  if (host?.ram > 85) rain = Math.max(rain, 0.6)
-
-  renderFlag()
-  renderTower()
-}
-
-function needsBox(car) {
-  const d = car.data
-  if (car.pitReason === 'reiniciou' || car.pitReason === 'de volta') return false
-  if (d.memLimitBytes && d.memBytes / d.memLimitBytes > 0.85) return true
-  return car.hot >= 2
-}
-
-function sendToBox(car, reason) {
-  if (car.state === 'out' || car.state === 'toBox' || car.state === 'inPit') return
-  car.state = 'toBox'
-  car.pitReason = reason
-  car.pitCount += reason === 'reiniciou' ? 1 : 0
-  addMessage(`${car.code} chamado ao box: ${reason}`)
-}
-
-function crash(car) {
-  car.state = 'out'
-  car.outAt = performance.now()
-  car.crashT = 0
-  const p = at(car.s)
-  const width = car.crashSide > 0 ? p.left : p.right
-  car.crashFrom = car.lane
-  car.crashTo = car.crashSide * (width + 6)
-  addMessage(`${car.code} bateu em ${cornerName(car.s)}: serviço offline`)
-}
-
-// ============================================================ quadro a quadro
-
-let lastFrame = performance.now()
-
-function step(dt) {
-  tick += dt
-  const list = [...cars.values()]
-  if (pulseState === 'sem-sinal' || telemetryLost) return // congela: não dá para saber o que está acontecendo
-
-  for (const car of list) {
-    const d = car.data
-    const noData = d.cpu == null
-    const targetWeight = weightOf(d)
-    car.weight = car.weight == null ? targetWeight : car.weight + (targetWeight - car.weight) * Math.min(1, dt * 0.6)
-
-    if (car.state === 'out') {
-      car.crashT = Math.min(1, car.crashT + dt / 0.7)
-      const k = 1 - (1 - car.crashT) ** 3
-      car.lane = car.crashFrom + (car.crashTo - car.crashFrom) * k
-      placeOnTrack(car)
-      car.angle += car.crashSpin * k
-      continue
-    }
-
-    if (car.state === 'inPit') {
-      const target = car.boxAt * PIT_LENGTH
-      const waiting = performance.now() < car.pitUntil || needsBox(car) || overrides.get(car.name)?.up === false
-      if (car.pitDist >= target - 0.5 && waiting) {
-        car.speed = 0
-      } else {
-        // Limite de velocidade só diante das garagens; o resto do pit lane é a longa saída.
-        car.speed = car.pitDist > 600 ? 55 : 22
-        if (car.pitDist < target && car.pitDist + car.speed * dt >= target) {
-          car.pitDist = target
-          car.pitUntil = performance.now() + BOX_MIN_S * 1000
-        } else {
-          car.pitDist += car.speed * dt
-        }
-        car.dist += car.speed * dt
-      }
-      if (car.pitDist >= PIT_LENGTH) {
-        car.state = 'run'
-        car.pitReason = ''
-        car.hot = 0
-        car.s = PIT_OUT
-        addMessage(`${car.code} voltou à pista`)
-      } else {
-        const p = pitAt(car.pitDist)
-        car.x = p.x
-        car.y = p.y
-        car.angle = headingOf(p.x, p.y, p.tx, p.ty)
-        continue
-      }
-    }
-
-    const i = Math.floor(mod(car.s) / STEP) % N
-    let v = (LENGTH / (noData ? slowestLap() : lapTime(car.weight))) * PACE[i]
-    if (car.state === 'toBox') v = Math.max(v, 55 * PACE[i])
-    const before = mod(car.s)
-    car.s = mod(car.s + v * dt)
-    car.dist += v * dt
-    car.speed = v
-
-    if (car.state === 'toBox') {
-      const crossed = before <= PIT_IN ? before + v * dt >= PIT_IN : before + v * dt - LENGTH >= PIT_IN
-      if (crossed) {
-        car.state = 'inPit'
-        car.pitDist = 0
-        continue
-      }
-    }
-
-    // Ultrapassagem: chegou perto de quem vai à frente, muda de lado.
-    let ahead = Infinity
-    for (const other of list) {
-      if (other === car || other.state === 'inPit' || other.state === 'out') continue
-      const gap = mod(other.s - car.s)
-      if (gap < ahead && gap < 15 && Math.abs(other.lane - car.lane) < 2.4) ahead = gap
-    }
-    if (ahead < 15) car.laneTarget = car.laneTarget > 0 ? -3.2 : 3.2
-    car.lane += (car.laneTarget - car.lane) * Math.min(1, dt * 1.5)
-    placeOnTrack(car)
-  }
-}
-
-function placeOnTrack(car) {
-  const p = at(car.s, car.lane)
-  const q = at(car.s + 5, car.lane)
-  car.x = p.x
-  car.y = p.y
-  const dx = q.x - p.x
-  const dy = q.y - p.y
-  const len = Math.hypot(dx, dy) || 1
-  car.angle = headingOf(p.x, p.y, dx / len, dy / len)
-}
-
-function headingOf(x, y, tx, ty) {
-  return Math.atan2(sy(x + tx, y + ty) - sy(x, y), sx(x + tx, y + ty) - sx(x, y))
-}
 
 function drawTrail(car) {
   if (car.state !== 'run' && car.state !== 'toBox') return
@@ -1234,7 +818,7 @@ function drawCrew(car, X, Y) {
 }
 
 function drawYellowFlags() {
-  for (const car of cars.values()) {
+  for (const car of race.cars.values()) {
     if (car.state !== 'out') continue
     // o setor inteiro fica amarelo, na borda da pista
     for (let s = car.s - 45; s < car.s + 45; s += 5) {
@@ -1251,6 +835,7 @@ function drawYellowFlags() {
 }
 
 function drawRain() {
+  const rain = race.rain
   if (rain <= 0.01) return
   ctx.fillStyle = `rgba(24,38,58,${0.22 * rain})`
   ctx.fillRect(0, 0, view.w, view.h)
@@ -1269,14 +854,25 @@ function drawRain() {
   }
 }
 
+
+/** Direção do carro em pixels: o mundo tem y para o norte, a tela tem y para baixo. */
+function screenAngle(car) {
+  return Math.atan2(sy(car.x + Math.cos(car.heading), car.y + Math.sin(car.heading)) - sy(car.x, car.y), sx(car.x + Math.cos(car.heading), car.y + Math.sin(car.heading)) - sx(car.x, car.y))
+}
+
+let lastFrame = performance.now()
+
 function frame(now) {
   const dt = Math.min(0.06, (now - lastFrame) / 1000)
   lastFrame = now
+  tick += dt
   step(dt)
+  for (const car of race.cars.values()) car.angle = screenAngle(car)
+  hovered = focus.car ?? focus.hover ?? null
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, view.w, view.h)
   drawYellowFlags()
-  const ordered = [...cars.values()].sort((a, b) => (a.state === 'out') - (b.state === 'out'))
+  const ordered = [...race.cars.values()].sort((a, b) => (a.state === 'out') - (b.state === 'out'))
   for (const car of ordered) drawTrail(car)
   for (const car of ordered) {
     const { X, Y } = drawCar(car)
@@ -1291,176 +887,13 @@ function frame(now) {
     }
   }
   drawRain()
-  // Atualiza voltas e posições sem depender do ritmo do feed.
-  if (Math.floor(now / 500) !== Math.floor((now - dt * 1000) / 500)) renderTower()
   requestAnimationFrame(frame)
 }
-
-// ============================================================ painéis
-
-const fmtBytes = (b) => (b == null ? '–' : b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GiB` : `${Math.round(b / 2 ** 20)} MiB`)
-const fmtRate = (b) => (b == null ? '–' : b >= 2 ** 20 ? `${(b / 2 ** 20).toFixed(1)} MiB/s` : b >= 1024 ? `${(b / 1024).toFixed(1)} KiB/s` : `${Math.round(b)} B/s`)
-
-function setControl(id, value, unit, warn, bad) {
-  const el = document.getElementById(id)
-  el.textContent = value == null ? '–' : `${Math.round(value)}${unit}`
-  el.className = value == null ? '' : value >= bad ? 'bad' : value >= warn ? 'warn' : ''
-}
-
-function renderControl() {
-  const live = document.getElementById('live')
-  const labels = { tailnet: ['AO VIVO', 'live'], publica: ['SEM NAS-PULSE', 'live is-off'], 'sem-sinal': ['SINAL PERDIDO', 'live is-bad'], esperando: ['CONECTANDO', 'live is-off'] }
-  const [text, cls] = labels[pulseState]
-  live.textContent = text
-  live.className = cls
-  setControl('c-temp', host?.temp, '°C', 70, 80)
-  setControl('c-cpu', host?.cpu, '%', 70, 90)
-  setControl('c-ram', host?.ram, '%', 75, 85)
-  setControl('c-swap', host?.swap, '%', 50, 80)
-  const disk = (m) => host?.disks?.find((d) => d.mount === m)?.usedPercent
-  setControl('c-root', disk('/'), '%', 80, 90)
-  setControl('c-data', disk('/data'), '%', 80, 90)
-  const warming = firstAt != null && (performance.now() - firstAt) / 1000 < WARMUP_S
-  const session = document.getElementById('session')
-  session.textContent = pulseState === 'publica' ? 'Só telemetria pública: sem CPU por serviço' : warming ? 'Volta de apresentação: aprendendo o normal' : `Corrida · ${cars.size} carros`
-}
-
-function renderFlag() {
-  const flag = document.getElementById('flag')
-  const tunnel = cars.get('cloudflared')
-  const outs = [...cars.values()].filter((c) => c.state === 'out')
-  let text = null
-  let cls = ''
-  if (pulseState === 'sem-sinal') {
-    text = 'SINAL PERDIDO · SERVIDOR SEM RESPOSTA'
-    cls = 'gray'
-  } else if (telemetryLost) {
-    text = 'TELEMETRIA PERDIDA · CORRIDA CONGELADA'
-    cls = 'gray'
-  } else if (tunnel?.state === 'out') {
-    text = 'BANDEIRA VERMELHA · TÚNEL FORA DO AR'
-    cls = 'red'
-  } else if (outs.length) {
-    text = `BANDEIRA AMARELA · ${outs.map((c) => cornerName(c.s).toUpperCase()).filter((v, i, a) => a.indexOf(v) === i).join(' · ')}`
-    cls = 'yellow'
-  }
-  flag.hidden = !text
-  if (text) {
-    flag.textContent = text
-    flag.className = `flag ${cls}`
-  }
-}
-
-const rowsEl = document.getElementById('rows')
-const rowEls = new Map()
-
-function rowFor(car) {
-  let row = rowEls.get(car.name)
-  if (row) return row
-  const li = document.createElement('li')
-  li.className = 'row'
-  const pos = document.createElement('span')
-  pos.className = 'pos'
-  const strip = document.createElement('span')
-  strip.className = 'strip'
-  strip.style.background = car.team.color
-  const code = document.createElement('span')
-  code.className = 'code'
-  code.textContent = car.code
-  const mem = document.createElement('span')
-  mem.className = 'mem'
-  const fill = document.createElement('i')
-  mem.append(fill)
-  code.append(mem)
-  const value = document.createElement('span')
-  value.className = 'value'
-  const laps = document.createElement('span')
-  laps.className = 'laps'
-  li.append(pos, strip, code, value, laps)
-  li.addEventListener('mouseenter', () => {
-    hovered = car
-    li.classList.add('is-focus')
-  })
-  li.addEventListener('mouseleave', () => {
-    hovered = null
-    li.classList.remove('is-focus')
-  })
-  rowsEl.append(li)
-  row = { li, pos, value, laps, fill }
-  rowEls.set(car.name, row)
-  return row
-}
-
-function renderTower() {
-  // OUT vai para o fim, como na classificação de verdade.
-  const ranked = [...cars.values()].sort((a, b) => (a.state === 'out') - (b.state === 'out') || b.dist - a.dist)
-  const height = rowsEl.clientHeight / Math.max(1, ranked.length)
-  ranked.forEach((car, i) => {
-    const row = rowFor(car)
-    const d = car.data
-    row.li.style.height = `${height}px`
-    row.li.style.transform = `translateY(${Math.round(i * height)}px)`
-    row.pos.textContent = String(i + 1)
-    const boxing = car.state === 'toBox' || car.state === 'inPit'
-    const noData = d.cpu == null && car.state !== 'out'
-    row.li.classList.toggle('is-out', car.state === 'out')
-    row.li.classList.toggle('is-box', boxing)
-    row.li.classList.toggle('is-nodata', noData && !boxing)
-    row.value.textContent = car.state === 'out' ? 'OUT' : car.state === 'inPit' ? 'PIT' : car.state === 'toBox' ? 'BOX' : noData ? 'SEM DADOS' : `${d.cpu.toFixed(1)}%`
-    row.laps.textContent = String(Math.max(0, Math.floor(car.dist / LENGTH)))
-    const memRatio = d.memBytes != null ? Math.min(1, d.memBytes / (d.memLimitBytes ?? 512 * 2 ** 20)) : 0
-    row.fill.style.width = `${memRatio * 100}%`
-    row.fill.style.background = memRatio > 0.85 ? '#ff5a52' : memRatio > 0.65 ? '#ffd400' : '#cdd2d8'
-  })
-}
-
-// ---------- modo de corrida ----------
-
-function renderMode() {
-  const m = MODES[mode]
-  document.getElementById('tower-title').textContent = m.title
-  document.getElementById('legend-speed').textContent = m.speed
-  document.getElementById('legend-front').textContent = m.front
-  for (const key of Object.keys(MODES)) {
-    document.getElementById(`mode-${key}`).setAttribute('aria-pressed', String(key === mode))
-  }
-}
-
-/** Voltas de um modo não comparam com as do outro: troca de modo é nova largada. */
-function setMode(next) {
-  if (next === mode) return
-  mode = next
-  try {
-    localStorage.setItem('interlagos-modo', mode)
-  } catch {
-    // sem armazenamento: vale só até recarregar a página
-  }
-  const ready = [...cars.values()].filter((car) => car.state === 'run').sort((a, b) => gridKey(a.data) - gridKey(b.data))
-  ready.forEach((car, i) => {
-    car.dist = -i * 8
-    car.s = mod(car.dist - 10)
-    car.lane = car.laneTarget = i % 2 ? 3.2 : -3.2
-    car.weight = null
-  })
-  // quem está no box ou no muro não volta ao grid, mas também não leva voltas antigas
-  for (const car of cars.values()) if (car.state !== 'run') car.dist = -ready.length * 8
-  addMessage(`Nova largada: quem mais consome anda ${MODES[mode].speed}`)
-  renderMode()
-  renderTower()
-}
-
-for (const key of Object.keys(MODES)) {
-  document.getElementById(`mode-${key}`).addEventListener('click', () => setMode(key))
-}
-
-// ---------- dica ----------
-
-const tip = document.getElementById('tip')
 
 function carAt(mx, my) {
   let best = null
   let dist = 16 * view.dpr
-  for (const car of cars.values()) {
+  for (const car of race.cars.values()) {
     const d = Math.hypot(sx(car.x, car.y) - mx, sy(car.x, car.y) - my)
     if (d < dist) {
       dist = d
@@ -1470,111 +903,29 @@ function carAt(mx, my) {
   return best
 }
 
-raceCanvas.addEventListener('mousemove', (event) => {
-  const rect = raceCanvas.getBoundingClientRect()
-  const car = carAt((event.clientX - rect.left) * view.dpr, (event.clientY - rect.top) * view.dpr)
-  hovered = car
-  if (!car) {
-    tip.hidden = true
-    return
-  }
-  const d = car.data
-  const lines = [car.team.name]
-  if (car.state === 'out') lines.push(`Offline · bateu em ${cornerName(car.s)}`)
-  else if (car.state === 'toBox' || car.state === 'inPit') lines.push(`No box: ${car.pitReason}`)
-  if (d.cpu != null) {
-    lines.push(`CPU ${d.cpu.toFixed(1)}% de um núcleo`)
-    lines.push(`Memória ${fmtBytes(d.memBytes)}${d.memLimitBytes ? ` de ${fmtBytes(d.memLimitBytes)}` : ''}`)
-    lines.push(`Rede ↓ ${fmtRate(d.rxBps)} · ↑ ${fmtRate(d.txBps)}`)
-  } else if (car.state !== 'out') lines.push('Sem métricas neste container')
-  lines.push(`${Math.max(0, Math.floor(car.dist / LENGTH))} voltas · ${car.pitCount} reinícios na sessão`)
-  const title = document.createElement('b')
-  title.textContent = car.name
-  tip.replaceChildren(title, ...lines.map((text) => {
-    const span = document.createElement('span')
-    span.textContent = text
-    return span
-  }))
-  tip.style.borderLeftColor = car.team.color
-  tip.style.left = `${Math.min(event.clientX - rect.left + 14, rect.width - 290)}px`
-  tip.style.top = `${Math.min(event.clientY - rect.top + 14, rect.height - 130)}px`
-  tip.hidden = false
-})
-raceCanvas.addEventListener('mouseleave', () => {
-  hovered = null
-  tip.hidden = true
-})
-
-// ---------- simulação ----------
-
-function fillSimTargets() {
-  const select = document.getElementById('sim-target')
-  select.replaceChildren(...[...cars.values()].sort((a, b) => a.name.localeCompare(b.name)).map((car) => {
-    const option = document.createElement('option')
-    option.value = car.name
-    option.textContent = car.name
-    return option
-  }))
-}
-
-const simTarget = () => document.getElementById('sim-target').value
-
-document.getElementById('sim-restart').addEventListener('click', () => {
-  const car = cars.get(simTarget())
-  if (!car) return
-  sendToBox(car, 'reiniciou')
-  addMessage(`Simulação: ${car.code} reiniciou`)
-})
-document.getElementById('sim-cpu').addEventListener('click', () => {
-  const name = simTarget()
-  const car = cars.get(name)
-  if (!car) return
-  overrides.set(name, { cpu: 95 })
-  car.hot = 2
-  sendToBox(car, 'CPU 95%')
-  car.data = { ...car.data, cpu: 95 }
-})
-document.getElementById('sim-off').addEventListener('click', () => {
-  const name = simTarget()
-  const car = cars.get(name)
-  if (!car) return
-  overrides.set(name, { up: false })
-  car.data = { ...car.data, up: false }
-  if (car.state === 'inPit') car.state = 'run'
-  crash(car)
-  renderFlag()
-})
-document.getElementById('sim-clear').addEventListener('click', () => {
-  const name = simTarget()
-  overrides.delete(name)
-  const car = cars.get(name)
-  if (car) car.hot = 0
-})
-
-// ============================================================ conexão
-
-function connect() {
-  const source = new EventSource('/events')
-  source.onmessage = (message) => {
-    try {
-      applyData(JSON.parse(message.data).services)
-    } catch (error) {
-      console.error(error)
-    }
-  }
-  source.onerror = () => {
-    pulseState = 'sem-sinal'
-    renderControl()
-    renderFlag()
-  }
-}
-
-new ResizeObserver(() => {
+export function startRenderer2D({ stage: stageEl, geo }) {
+  stage = stageEl
+  layers = geo.layers
+  trackCanvas = document.getElementById('track')
+  raceCanvas = document.getElementById('race')
+  raceCanvas.hidden = false
+  tctx = trackCanvas.getContext('2d')
+  ctx = raceCanvas.getContext('2d')
+  raceCanvas.addEventListener('mousemove', (event) => {
+    const rect = raceCanvas.getBoundingClientRect()
+    const car = carAt((event.clientX - rect.left) * view.dpr, (event.clientY - rect.top) * view.dpr)
+    focus.hover = car
+    showTip(car, event.clientX - rect.left, event.clientY - rect.top, rect)
+  })
+  raceCanvas.addEventListener('mouseleave', () => {
+    focus.hover = null
+    showTip(null)
+  })
+  new ResizeObserver(layout).observe(stage)
   layout()
-  renderTower()
-}).observe(stage)
-layout()
-renderMode()
-addMessage('Sessão iniciada: carros no grid')
-connect()
-requestAnimationFrame(frame)
+  requestAnimationFrame(frame)
+}
+
+void CIRCUIT
+void LENGTH
+void mod

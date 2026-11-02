@@ -11,6 +11,7 @@
       <section class="stage" id="stage" aria-label="Circuito de Interlagos com um carro por container">
         <canvas id="track"></canvas>
         <canvas id="race"></canvas>
+        <div id="tags" class="tags" aria-hidden="true"></div>
 
         <header class="control" aria-label="Direção de prova">
           <div class="control-title">
@@ -41,6 +42,7 @@
           <span><b>Rastro</b> rede</span>
           <span><b>Box</b> atenção</span>
           <span><b>Muro</b> offline</span>
+          <span class="legend-hint">Roda do mouse aproxima · arraste move · duplo clique volta</span>
         </aside>
 
         <details class="sim">
@@ -55,8 +57,13 @@
           <p>Só nesta tela. Não toca no servidor.</p>
         </details>
 
-        <p class="credits">Pista: TUMFTM racetrack-database · Entorno: © colaboradores do OpenStreetMap · Patrocinadores e arquibancadas temporárias são ilustrativos</p>
+        <p class="credits">Pista: TUMFTM racetrack-database · Relevo: SRTM/USGS · Entorno: © colaboradores do OpenStreetMap · Texturas: Poly Haven · Patrocinadores e arquibancadas temporárias são ilustrativos</p>
         <div id="tip" class="tip" hidden></div>
+
+        <div id="loader" class="loader">
+          <span class="loader-bar" aria-hidden="true"></span>
+          <p id="loader-text">Preparando o circuito…</p>
+        </div>
       </section>
 
       <aside class="tower" aria-label="Classificação">
@@ -75,6 +82,6 @@
         <ol id="rows" class="rows"></ol>
       </aside>
     </main>
-    <script type="module" src="/interlagos.js"></script>
+    <script type="module" src="/interlagos/main.js"></script>
   </body>
 </html>
