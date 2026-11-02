@@ -7,14 +7,17 @@
 //   - silos               = disco de / e /data
 //   - puff + aviso no log = container reiniciou (start_time aumentou)
 // Fonte: /api/pulse pela tailnet. Fora dela, só a telemetria pública: as casas
-// acendem e apagam, mas sem pacotes nem fumaça — o mapa não inventa movimento.
+// acendem e apagam, mas sem pacotes, fumaça nem faíscas — o mapa não inventa medição.
+// A ronda dos zeladores é só vida no mapa: o que é medido é onde eles param mais tempo.
+// Com movimento reduzido eles continuam andando, como os agentes no modo Arcade; só o
+// decorativo (fumaça, faíscas, telescópio) desliga.
 
 export const SERVIDOR = {
   id: 'servidor',
   name: 'Servidor (nas-server)',
   subtitle: 'o nas-server por dentro, ao vivo',
   legend:
-    'Cada casa é um container do nas-server. Pacotes na avenida são o tráfego de rede real de cada um; fumaça é CPU; a barra na parede é memória. Passe o mouse para ver os números.',
+    'Cada casa é um container do nas-server. Pacotes na avenida são o tráfego de rede real de cada um; fumaça é CPU; a barra na parede é memória. O zelador faz a ronda e para mais tempo onde há mais movimento. Passe o mouse para ver os números.',
   roles: {
     gatekeeper: { label: 'Porteiro (cloudflared)', pal: { h: '#f48120', s: '#f1c9a5', e: '#1a1a1a', c: '#f48120', a: '#ffffff', p: '#2c3e66', b: '#3a2a1a' }, head: ['..hhhh..', 'hhhhhhhh'] },
     sentinel: { label: 'Sentinela (AdGuard)', pal: { h: '#68bc71', s: '#e9b48c', e: '#1a1a1a', c: '#2f7a45', a: '#c9e36b', p: '#26324a', b: '#2a2a2a' }, head: ['..hhhh..', '.hhhhhh.', '.hsssshh', '.hessesh'] },
@@ -113,6 +116,8 @@ const SHORT_NAMES = {
 }
 
 // ============================================================ números
+
+const WORK_SCORE = 1.2 // abaixo disso a casa está quieta: o zelador passa, mas não trabalha
 
 const fmtBytes = (b) => (b == null ? '–' : b >= 2 ** 30 ? `${(b / 2 ** 30).toFixed(1)} GiB` : b >= 2 ** 20 ? `${Math.round(b / 2 ** 20)} MiB` : `${Math.round(b / 1024)} KiB`)
 const fmtRate = (b) => (b == null ? '–' : b >= 2 ** 20 ? `${(b / 2 ** 20).toFixed(1)} MiB/s` : b >= 1024 ? `${(b / 1024).toFixed(1)} KiB/s` : `${Math.round(b)} B/s`)
@@ -218,10 +223,18 @@ export function createServerWorld(api) {
     if (!k) {
       const d = DISTRICTS[district]
       const homeX = (d.x + d.slots * 1.5) * T
-      k = { district, role: d.keeper, x: homeX, y: d.row === 'north' ? NORTH_WALK : SOUTH_WALK, tx: homeX, t: Math.random() * 10, flip: false, mode: 'idle', emote: null, nextFx: 0 }
+      k = { district, role: d.keeper, x: homeX, y: d.row === 'north' ? NORTH_WALK : SOUTH_WALK, tx: homeX, t: Math.random() * 10, flip: false, mode: 'idle', emote: null, nextFx: 0, stop: null, until: 0, arriving: false }
       keepers.set(district, k)
     }
     return k
+  }
+
+  /** Próxima parada da ronda: casa mais ocupada tem mais chance, mas todas recebem visita. */
+  function nextStop(k, members) {
+    const options = members.length > 1 ? members.filter((h) => h !== k.stop) : members
+    const weights = options.map((h) => 0.5 + activity(h))
+    let r = Math.random() * weights.reduce((sum, w) => sum + w, 0)
+    return options.find((_, i) => (r -= weights[i]) <= 0) ?? options[0]
   }
 
   function updateKeepers(dt, time) {
@@ -233,22 +246,33 @@ export function createServerWorld(api) {
       }
       const k = keeperFor(district)
       k.t += dt
-      const busiest = members.reduce((a, b) => (activity(b) > activity(a) ? b : a))
-      const score = activity(busiest)
-      // Pouco movimento, ou nenhuma métrica (fora da tailnet): o zelador fica sentado
-      // no meio do distrito. Sem dado não há trabalho para mostrar; só um container
-      // fora do ar (score 100) o tira de lá.
-      if (score < 1.2) {
-        const d = DISTRICTS[district]
-        k.tx = (d.x + d.slots * 1.5) * T - 4
-        k.mode = 'idle'
-      } else {
-        k.tx = busiest.door.x
-        k.mode = busiest.data.up ? 'work' : 'alarm'
-        k.target = busiest
+      const down = members.find((h) => !h.data.up)
+      const arrived = Math.abs(k.tx - k.x) <= 1
+      if (down) {
+        // Container fora interrompe a ronda.
+        k.stop = down
+        k.tx = down.door.x
+        k.until = 0
+        k.arriving = false
+        k.mode = 'alarm'
+      } else if (arrived && k.arriving) {
+        // A parada dura mais onde há mais movimento.
+        k.arriving = false
+        k.until = time + 1.5 + Math.min(6, activity(k.stop))
+      } else if (arrived && time >= k.until) {
+        const stop = nextStop(k, members)
+        // Bairro de uma casa só: passeia na calçada e volta para a porta.
+        k.tx = members.length === 1 && Math.abs(k.tx - stop.door.x) <= 1 ? stop.door.x + 22 : stop.door.x
+        k.stop = stop
+        k.arriving = true
+      }
+      const score = k.stop ? activity(k.stop) : 0
+      if (!down) {
+        // Faíscas só com número real; sentar só quando o bairro inteiro está quieto.
+        k.mode = score >= WORK_SCORE ? 'work' : members.every((h) => activity(h) < 0.3) ? 'idle' : 'look'
       }
       const dx = k.tx - k.x
-      const speed = 26 + Math.min(40, score * 4)
+      const speed = 24 + Math.min(40, score * 4)
       if (Math.abs(dx) > 1) {
         k.x += Math.sign(dx) * Math.min(Math.abs(dx), speed * dt)
         k.flip = dx < 0
@@ -551,7 +575,12 @@ export function createServerWorld(api) {
   function drawKeepers(ctx, time) {
     const all = [...keepers.values()]
     const gate = houses.get('cloudflared')
-    if (gate) all.push({ role: 'gatekeeper', x: POINTS.gate.x - 2, y: AVE_Y + 26, walking: false, t: time, flip: false, mode: gate.data.up ? 'work' : 'alarm', emote: gate.data.up ? null : { text: '!' } })
+    if (gate) {
+      // O porteiro vai e volta sob o arco; com o túnel fora, para e dá o alarme.
+      const pacing = gate.data.up
+      const pace = Math.cos(time * 0.6)
+      all.push({ role: 'gatekeeper', x: POINTS.gate.x - 2 + (pacing ? Math.sin(time * 0.6) * 14 : 0), y: AVE_Y + 26, walking: pacing && Math.abs(pace) > 0.15, t: time, flip: pacing && pace < 0, mode: gate.data.up ? 'look' : 'alarm', emote: gate.data.up ? null : { text: '!' } })
+    }
     for (const k of all.sort((a, b) => a.y - b.y)) {
       const sitting = k.mode === 'idle' && !k.walking
       const legs = k.walking ? (Math.floor(k.t * 8) % 2 ? 'walkA' : 'walkB') : sitting ? 'sit' : 'stand'
@@ -606,7 +635,7 @@ export function createServerWorld(api) {
       label(lm.name, (x + w / 2) * T, y * T + yOff, 'sign')
     }
     if (source !== 'tailnet') {
-      label(source === 'pública' ? 'sem a tailnet: só a telemetria pública (casas acendem e apagam, sem tráfego)' : 'sem dados do servidor', 20 * T, 23 * T + 6, 'signBad')
+      label(source === 'pública' ? 'sem o nas-pulse: só a telemetria pública (casas acendem e apagam, sem tráfego)' : 'sem dados do servidor', 20 * T, 23 * T + 6, 'signBad')
     }
   }
 

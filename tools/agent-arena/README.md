@@ -89,14 +89,14 @@ os mesmos dados reais. A escolha fica salva no navegador.
   | Casa na avenida | Um container. Apagada e com tábuas na porta = parado |
   | Pacotes | Bytes/s de rede de cada container, em escala logarítmica. A cor diz de onde vêm: túnel, rede de casa e tailnet, rede interna, ou resposta saindo |
   | Fumaça e barra na parede | CPU e memória do container |
-  | Zelador | Vai até a casa mais ocupada do bairro; senta se nada acontece; `!` se um container cai ou reinicia |
+  | Zelador | Faz a ronda pelas casas do bairro. O passeio é só vida no mapa; o medido é a escolha da parada e o tempo nela, maiores onde há mais movimento. Faíscas = casa com atividade real. Senta se o bairro está quieto; `!` se um container cai ou reinicia |
   | Usina | CPU, carga, RAM (caixa d'água), swap (barril) e temperatura do host |
   | Silos | Disco de `/` e `/data` |
   | Clima | Acima de 60 °C, o mapa esquenta |
 
   **De onde vêm os números:** do [`nas-pulse`](../../docker/nas-pulse/README.md), lido pela tailnet a cada 5 s.
-  Fora da tailnet, o mapa usa a telemetria pública e avisa: as casas acendem e apagam, mas sem tráfego, fumaça
-  nem trabalho, porque esses números não existem nela. A origem do tráfego é inferida pelo papel do serviço (o
+  Sem ele, o mapa usa a telemetria pública e avisa: as casas acendem e apagam e os zeladores seguem a ronda, mas
+  sem tráfego, fumaça nem faíscas, porque esses números não existem nela. O motivo da falha aparece no terminal do Arena. A origem do tráfego é inferida pelo papel do serviço (o
   cAdvisor só mede o volume), e a dica do mouse deixa isso explícito. `ARENA_PULSE_URL` troca o endereço.
 
 ## Privacidade
