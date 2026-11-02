@@ -435,12 +435,19 @@ async function pollTelemetry() {
 
 const num = (v) => (Number.isFinite(v) ? v : null)
 let pulseError = null
+let pulseBusy = false
+let pulseGoodAt = 0
+// O servidor está em WiFi: uma leitura perdida é normal e não pode apagar os dados da tela.
+// Só depois deste tempo sem resposta é que o mapa assume que o nas-pulse está fora.
+const PULSE_TOLERANCE_MS = 30_000
 
 /** Detalhe por container, só pela tailnet. Falhar aqui é normal fora de casa. */
 async function pollPulse() {
+  if (pulseBusy) return
+  pulseBusy = true
   try {
     const started = performance.now()
-    const response = await fetch(PULSE_URL, { signal: AbortSignal.timeout(3000) })
+    const response = await fetch(PULSE_URL, { signal: AbortSignal.timeout(8000) })
     if (!response.ok) throw new Error(String(response.status))
     const data = await response.json()
     const age = Date.now() - Date.parse(data.generatedAt)
@@ -461,14 +468,19 @@ async function pollPulse() {
     }
     services.pulseOk = Number.isFinite(age) && age < 60_000
     services.pulseMs = Math.round(performance.now() - started)
+    pulseGoodAt = Date.now()
     pulseError = null
   } catch (error) {
-    services.pulseOk = false
-    // Fora de casa falhar é normal, mas o motivo tem que aparecer: um 404 aqui ficou
-    // invisível e parecia falta de tailnet. Registra só quando o motivo muda.
-    const reason = error?.cause?.code ?? error?.message ?? 'erro'
-    if (reason !== pulseError) console.warn(`nas-pulse indisponível (${PULSE_URL}): ${reason}`)
-    pulseError = reason
+    if (Date.now() - pulseGoodAt > PULSE_TOLERANCE_MS) {
+      services.pulseOk = false
+      // Fora de casa falhar é normal, mas o motivo tem que aparecer: um 404 aqui ficou
+      // invisível e parecia falta de tailnet. Registra só quando o motivo muda.
+      const reason = error?.cause?.code ?? error?.message ?? 'erro'
+      if (reason !== pulseError) console.warn(`nas-pulse indisponível (${PULSE_URL}): ${reason}`)
+      pulseError = reason
+    }
+  } finally {
+    pulseBusy = false
   }
 }
 
@@ -510,7 +522,11 @@ async function tick() {
   for (const response of clients) response.write(payload)
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' }
+const TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',
+  // Com nosniff, o navegador recusa imagem servida como octet-stream.
+  '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.bin': 'application/octet-stream',
+}
 const HEADERS = {
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
