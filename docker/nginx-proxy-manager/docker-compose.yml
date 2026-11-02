@@ -3,10 +3,18 @@ services:
     image: "jc21/nginx-proxy-manager:latest"
     container_name: nginx-proxy-manager
     restart: unless-stopped
+    # Tudo preso ao gateway do bridge do Docker (172.17.0.1), alcançável
+    # pelo cloudflared e inalcançável de fora da máquina.
+    #
+    # Antes era "80:80", "81:81" e "443:443": todas as interfaces. O Docker
+    # escreve as próprias regras de iptables e passa por cima do ufw, então
+    # o painel de administração respondia para qualquer aparelho do WiFi —
+    # confirmado da rede local em 01/11/2026. O acesso legítimo ao painel é
+    # o npm.ebls.com.br, pelo túnel, que já apontava para 172.17.0.1:81.
     ports:
-      - "80:80"      # Porta HTTP
-      - "81:81"      # Painel de Administração Web
-      - "443:443"    # Porta HTTPS
+      - "172.17.0.1:80:80"     # HTTP
+      - "172.17.0.1:81:81"     # Painel de administração
+      - "172.17.0.1:443:443"   # HTTPS
     volumes:
       - /data/nginx-proxy-manager/data:/data
       - /data/nginx-proxy-manager/letsencrypt:/etc/letsencrypt
