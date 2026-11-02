@@ -99,6 +99,27 @@ os mesmos dados reais. A escolha fica salva no navegador.
   sem tráfego, fumaça nem faíscas, porque esses números não existem nela. O motivo da falha aparece no terminal do Arena. A origem do tráfego é inferida pelo papel do serviço (o
   cAdvisor só mede o volume), e a dica do mouse deixa isso explícito. `ARENA_PULSE_URL` troca o endereço.
 
+## Interlagos (tela de teste)
+
+Em http://127.0.0.1:4580/interlagos.html, com um carro por container e os mesmos dados do modo Servidor.
+
+| Na corrida | Medido |
+|---|---|
+| Velocidade | Peso do serviço: quanto mais consome, mais lento. 70% CPU e 30% memória, em escala logarítmica: 45 s por volta sem carga, até 180 s no máximo |
+| Posição e voltas | Distância percorrida na sessão: na frente, quem menos consome. Zera ao recarregar a página |
+| Rastro | Tráfego de rede |
+| Traço na torre | Memória, do limite quando existe (senão, de 512 MiB) |
+| Box | Reinício, memória acima de 85% do limite ou CPU acima de 3 vezes o normal dele. A regra de CPU só vale depois dos 5 min da volta de apresentação |
+| Muro e bandeira amarela | Serviço offline |
+| Bandeira vermelha | `cloudflared` offline |
+| Corrida congelada | Mais da metade fora (a medição parou) ou nenhuma fonte respondendo |
+| Chuva | Swap crescendo ou RAM acima de 85% |
+
+**Fidelidade:** o traçado vem de `build-interlagos.py` (pista medida do TUMFTM, LGPL-3.0, encaixada nas vias do
+OpenStreetMap com erro médio de 3 m). Prédios, lagos e mata são do OpenStreetMap (ODbL). Arquibancadas
+temporárias, tendas e patrocinadores são ilustrativos, e os patrocinadores são os seus próprios projetos, sem marcas
+de terceiros. Os botões "Simular" só mudam a tela. Ainda não existe detecção de vazamento de memória.
+
 ## Privacidade
 
 O servidor escuta só em `127.0.0.1`. Os transcripts nunca saem da máquina: o feed leva só o nome da
