@@ -1,0 +1,3 @@
+# Roda no nas-server (Linux). Com core.autocrlf=true, o checkout no
+# Windows converteria para CRLF e o container quebraria calado.
+* text=auto eol=lf

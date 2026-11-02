@@ -1,0 +1,54 @@
+# =============================================================
+# nas-pulse — métricas por container para o mapa do servidor
+# =============================================================
+# Sobe com:
+#   cd /data/nas-pulse
+#   docker compose up -d --build
+#
+# Exposição: SÓ a tailnet. A porta fica presa em 127.0.0.1 e o
+# `tailscale serve` a publica para as minhas máquinas (ver README.md).
+# =============================================================
+
+services:
+  pulse:
+    build: .
+    container_name: nas-pulse
+    restart: unless-stopped
+
+    environment:
+      - PROMETHEUS_URL=http://prometheus:9090
+      - HOST_LABEL=nas-server
+
+    # Loopback, e não o IP da Tailscale direto como o ai-memory faz: se o
+    # Docker subir antes da tailscale0 existir (boot após queda de luz),
+    # o bind no IP 100.x falha e o container fica parado sem tentar de
+    # novo. O `tailscale serve` não tem esse problema — sobe junto com o
+    # tailscaled e alcança o loopback quando o container estiver de pé.
+    ports:
+      - "127.0.0.1:9106:9106"
+
+    # Só a rede do Prometheus. Este serviço não precisa alcançar mais nada.
+    networks:
+      - monitoring
+
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
+networks:
+  monitoring:
+    external: true
+    name: monitoring_default
