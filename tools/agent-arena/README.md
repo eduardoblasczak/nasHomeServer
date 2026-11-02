@@ -105,8 +105,8 @@ Em http://127.0.0.1:4580/interlagos.html, com um carro por container e os mesmos
 
 | Na corrida | Medido |
 |---|---|
-| Velocidade | Peso do serviço: quanto mais consome, mais lento. 70% CPU e 30% memória, em escala logarítmica: 45 s por volta sem carga, até 180 s no máximo |
-| Posição e voltas | Distância percorrida na sessão: na frente, quem menos consome. Zera ao recarregar a página |
+| Velocidade | Peso do serviço: 70% CPU e 30% memória, em escala logarítmica. O seletor da torre escolhe o efeito. **Mais rápido** (padrão): 110 s por volta sem carga, 30 s no máximo. **Mais lento**: 45 s sem carga, 180 s no máximo. Trocar o modo faz uma nova largada |
+| Posição e voltas | Distância percorrida na sessão: na frente fica quem mais consome ou quem menos consome, conforme o modo. Zera ao recarregar a página |
 | Rastro | Tráfego de rede |
 | Traço na torre | Memória, do limite quando existe (senão, de 512 MiB) |
 | Box | Reinício, memória acima de 85% do limite ou CPU acima de 3 vezes o normal dele. A regra de CPU só vale depois dos 5 min da volta de apresentação |

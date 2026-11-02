@@ -330,6 +330,44 @@ canvas {
   font-size: 12px;
 }
 
+.mode {
+  margin-top: 9px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.mode-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+}
+
+.mode button {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode button:hover {
+  color: var(--ink);
+}
+
+.mode button[aria-pressed='true'] {
+  background: var(--ink);
+  color: #0d0f12;
+}
+
+.mode button:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
+
 .tower-head,
 .row {
   display: grid;

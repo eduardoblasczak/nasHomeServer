@@ -1,6 +1,7 @@
 // Interlagos: cada container do nas-server é um carro, numa pista com o traçado medido.
-//   velocidade = peso do serviço: mais CPU e memória, mais lento (escala logarítmica)
-//   posição    = distância percorrida na sessão: na frente, quem menos consome
+//   velocidade = peso do serviço (CPU e memória, em escala logarítmica). O seletor da torre
+//                define se quem mais consome anda mais rápido (padrão) ou mais lento
+//   posição    = distância percorrida na sessão
 //   rastro     = rede                              box     = reinício ou comportamento anormal
 //   muro       = offline                           equipe  = sistema ao qual o container pertence
 // Só o que é medido muda o estado dos carros. O cenário do fim de semana é ilustrativo.
@@ -872,8 +873,30 @@ function weightOf(d) {
   return 0.7 * cpu + 0.3 * mem
 }
 
-/** Tempo de volta: 45 s sem carga, 180 s no peso máximo. Quanto mais consome, mais lento. */
-const lapTime = (weight) => 45 * 4 ** weight
+// O que o consumo faz com o carro. A escolha fica salva neste navegador.
+const MODES = {
+  rapido: {
+    title: 'QUEM MAIS CONSOME', speed: 'mais rápido', front: 'quem mais consome',
+    lap: (weight) => 110 * (30 / 110) ** weight, // 110 s sem carga, 30 s no peso máximo
+    grid: (weight) => -weight,
+  },
+  lento: {
+    title: 'QUEM MENOS CONSOME', speed: 'mais lento', front: 'quem menos consome',
+    lap: (weight) => 45 * 4 ** weight, // 45 s sem carga, 180 s no peso máximo
+    grid: (weight) => weight,
+  },
+}
+let mode = 'rapido'
+try {
+  if (MODES[localStorage.getItem('interlagos-modo')]) mode = localStorage.getItem('interlagos-modo')
+} catch {
+  // armazenamento bloqueado: fica o padrão
+}
+
+const lapTime = (weight) => MODES[mode].lap(weight)
+// Sem métrica não há o que classificar: anda no ritmo mais lento do modo e fica atrás dos medidos.
+const slowestLap = () => Math.max(lapTime(0), lapTime(1))
+const gridKey = (data) => (data.cpu == null ? Infinity : MODES[mode].grid(weightOf(data)))
 
 function addMessage(text) {
   messages.unshift({ at: new Date(), text })
@@ -923,10 +946,9 @@ function applyData(services) {
   renderControl()
   if (!list) return
 
-  // Grid inicial: quem consome menos larga na frente; sem métrica, no fim.
+  // Grid inicial: na ordem do modo escolhido; sem métrica, no fim.
   if (!cars.size) {
-    const key = (c) => (c.cpu == null ? 2 : weightOf(c))
-    ;[...list].sort((a, b) => key(a) - key(b)).forEach((c, i) => newCar(c.name, i))
+    ;[...list].sort((a, b) => gridKey(a) - gridKey(b)).forEach((c, i) => newCar(c.name, i))
     firstAt = performance.now()
     fillSimTargets()
   }
@@ -1073,7 +1095,7 @@ function step(dt) {
     }
 
     const i = Math.floor(mod(car.s) / STEP) % N
-    let v = (LENGTH / (noData ? 78 : lapTime(car.weight))) * PACE[i]
+    let v = (LENGTH / (noData ? slowestLap() : lapTime(car.weight))) * PACE[i]
     if (car.state === 'toBox') v = Math.max(v, 55 * PACE[i])
     const before = mod(car.s)
     car.s = mod(car.s + v * dt)
@@ -1392,6 +1414,45 @@ function renderTower() {
   })
 }
 
+// ---------- modo de corrida ----------
+
+function renderMode() {
+  const m = MODES[mode]
+  document.getElementById('tower-title').textContent = m.title
+  document.getElementById('legend-speed').textContent = m.speed
+  document.getElementById('legend-front').textContent = m.front
+  for (const key of Object.keys(MODES)) {
+    document.getElementById(`mode-${key}`).setAttribute('aria-pressed', String(key === mode))
+  }
+}
+
+/** Voltas de um modo não comparam com as do outro: troca de modo é nova largada. */
+function setMode(next) {
+  if (next === mode) return
+  mode = next
+  try {
+    localStorage.setItem('interlagos-modo', mode)
+  } catch {
+    // sem armazenamento: vale só até recarregar a página
+  }
+  const ready = [...cars.values()].filter((car) => car.state === 'run').sort((a, b) => gridKey(a.data) - gridKey(b.data))
+  ready.forEach((car, i) => {
+    car.dist = -i * 8
+    car.s = mod(car.dist - 10)
+    car.lane = car.laneTarget = i % 2 ? 3.2 : -3.2
+    car.weight = null
+  })
+  // quem está no box ou no muro não volta ao grid, mas também não leva voltas antigas
+  for (const car of cars.values()) if (car.state !== 'run') car.dist = -ready.length * 8
+  addMessage(`Nova largada: quem mais consome anda ${MODES[mode].speed}`)
+  renderMode()
+  renderTower()
+}
+
+for (const key of Object.keys(MODES)) {
+  document.getElementById(`mode-${key}`).addEventListener('click', () => setMode(key))
+}
+
 // ---------- dica ----------
 
 const tip = document.getElementById('tip')
@@ -1513,6 +1574,7 @@ new ResizeObserver(() => {
   renderTower()
 }).observe(stage)
 layout()
+renderMode()
 addMessage('Sessão iniciada: carros no grid')
 connect()
 requestAnimationFrame(frame)

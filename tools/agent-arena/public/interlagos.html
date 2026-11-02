@@ -36,8 +36,8 @@
         </section>
 
         <aside class="legend">
-          <span><b>Mais lento</b> mais CPU e memória</span>
-          <span><b>Na frente</b> quem menos consome</span>
+          <span><b>Mais CPU e memória</b> <span id="legend-speed">mais rápido</span></span>
+          <span><b>Na frente</b> <span id="legend-front">quem mais consome</span></span>
           <span><b>Rastro</b> rede</span>
           <span><b>Box</b> atenção</span>
           <span><b>Muro</b> offline</span>
@@ -61,8 +61,15 @@
 
       <aside class="tower" aria-label="Classificação">
         <header>
-          <h1>CLASSIFICAÇÃO</h1>
+          <h1 id="tower-title">QUEM MAIS CONSOME</h1>
           <p id="session">Volta de apresentação</p>
+          <div class="mode" role="group" aria-label="O que o consumo faz com o carro">
+            <span>Quem consome mais anda</span>
+            <div class="mode-buttons">
+              <button id="mode-rapido" type="button" aria-pressed="true">Mais rápido</button>
+              <button id="mode-lento" type="button" aria-pressed="false">Mais lento</button>
+            </div>
+          </div>
         </header>
         <div class="tower-head"><span>POS</span><span>SERVIÇO</span><span>CPU</span><span>VOLTAS</span></div>
         <ol id="rows" class="rows"></ol>
