@@ -67,6 +67,19 @@ vec3 aces(vec3 x) {
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
+// Uma camada de riscos: finos, inclinados, com tamanho e posição diferentes em cada célula.
+float rainLayer(vec2 px, float speed, vec2 cell, float rarity) {
+  px.x += px.y * 0.13;
+  px.y += uTime * speed;
+  vec2 id = floor(px / cell);
+  vec2 f = fract(px / cell);
+  float h = hash(id);
+  float x = abs(f.x - 0.2 - 0.6 * fract(h * 19.7)) * cell.x;
+  float line = smoothstep(1.1, 0.15, x);
+  float span = smoothstep(0.0, 0.25, f.y) * smoothstep(1.0, 0.55, f.y);
+  return step(rarity, h) * line * span;
+}
+
 void main() {
   vec3 c = texture2D(tScene, vUv).rgb;
   c += texture2D(tBloom, vUv).rgb * uBloom;
@@ -74,12 +87,9 @@ void main() {
   // chuva: céu fechado e riscos finos descendo pela tela
   if (uRain > 0.001) {
     c *= mix(vec3(1.0), vec3(0.62, 0.67, 0.75), uRain);
-    vec2 p = vUv * uResolution * vec2(1.0, 0.11);
-    p.y += uTime * 240.0;
-    p.x += p.y * 0.17;
-    vec2 cell = floor(p / vec2(9.0, 7.0));
-    float drop = step(0.965, hash(cell)) * smoothstep(0.5, 0.0, abs(fract(p.x / 9.0) - 0.5));
-    c += drop * 0.09 * uRain;
+    vec2 px = vUv * uResolution;
+    float drops = rainLayer(px, 2600.0, vec2(11.0, 150.0), 0.93) * 0.6 + rainLayer(px + 37.0, 1700.0, vec2(7.0, 90.0), 0.95) * 0.4;
+    c += drops * 0.16 * uRain;
   }
 
   c *= uExposure;
@@ -98,7 +108,8 @@ void main() {
 }
 `
 
-export function createPost(renderer, { samples = 4, bloom = true } = {}) {
+export function createPost(renderer, { samples = 4, bloom: bloomOn = true } = {}) {
+  let bloom = bloomOn
   const quadScene = new THREE.Scene()
   const quadCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2))
@@ -150,9 +161,12 @@ export function createPost(renderer, { samples = 4, bloom = true } = {}) {
     setRain(v) {
       composite.uniforms.uRain.value = v
     },
-    setSamples(n) {
-      main.samples = n
-      main.dispose()
+    setQuality({ samples: n, bloom: on }) {
+      bloom = on
+      if (main.samples !== n) {
+        main.samples = n
+        main.dispose()
+      }
     },
     render(time) {
       renderer.autoClear = false

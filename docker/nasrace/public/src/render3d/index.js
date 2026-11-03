@@ -2,16 +2,36 @@
 // mantido baixo de propósito: a sombra estática sai de um único cozimento, e o terreno e a pista
 // só leem texturas prontas. É o que dá margem para os 144 Hz na RTX 3050.
 
-import { race } from '../race.js'
-import { bakeToTarget, loadTiled, NOISE_GLSL, shared, THREE } from './common.js'
+import { at, CIRCUIT, STEP } from '../circuit.js'
+import { race, MODES } from '../race.js'
+import { HOSPITALITY, MASTS, REPLACED, STANDS, TENTS, TRUCKS, PADDOCK_CENTER } from '../venue.js'
+import { BRAND_ROWS, createBrandAtlas, loadBrandFont } from './brands.js'
+import { bakeNoise, bakeToTarget, loadTiled, NOISE_GLSL, seeded, shared, THREE } from './common.js'
 import { createCameraRig } from './camera.js'
 import { createCars } from './cars.js'
+import { addGrandPrix, createFlags, createPitBoards, createScreens, createStartLights } from './gp.js'
+import { KitBuilder, kitMesh } from './kit.js'
 import { createPost } from './post.js'
-import { buildBuildings, buildTanks, buildTrees, buildWater } from './scenery.js'
+import { addBuildings, addTanks, buildTrees, buildWater } from './scenery.js'
 import { buildHeightField, createTerrain } from './terrain.js'
 import { createTrack, flagStripGeometry } from './track.js'
 
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// Do melhor para o mais leve. O sistema desce sozinho se o computador não der conta (ver main.js).
+export const QUALITY = [
+  { name: 'alta', dpr: 1.5, samples: 4, bloom: true, treeRadius: 330 },
+  { name: 'média', dpr: 1, samples: 4, bloom: true, treeRadius: 200 },
+  { name: 'baixa', dpr: 1, samples: 2, bloom: true, treeRadius: 90 },
+  { name: 'mínima', dpr: 0.8, samples: 0, bloom: false, treeRadius: 0 },
+]
+
+// O que é montado uma vez ao abrir. Tamanhos em pixels. A versão leve ocupa um quarto da memória nas
+// texturas e tira detalhes de telhado e de copa que de longe nem aparecem (ver main.js).
+export const LOADS = {
+  cheia: { shadow: 8192, ground: 4096, around: 2048, simple: false },
+  leve: { shadow: 4096, ground: 2048, around: 1024, simple: true },
+}
 
 // Sol da tarde vindo do lado direito da tela (norte), um pouco para o lado da câmera: ilumina a
 // frente das arquibancadas e deixa sombras compridas para a esquerda.
@@ -135,8 +155,9 @@ function bakeClouds(renderer) {
   return target
 }
 
-export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover }) {
+export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover, quality: firstQuality = 0, load = LOADS.cheia }) {
   const say = (text) => onProgress?.(text)
+  let quality = QUALITY[firstQuality]
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: false,
@@ -176,41 +197,80 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
   sun.position.copy(center).addScaledVector(SUN, 2400)
   sun.target.position.copy(center)
   sun.castShadow = true
-  sun.shadow.mapSize.set(8192, 8192)
+  const shadowSize = Math.min(load.shadow, renderer.capabilities.maxTextureSize)
+  sun.shadow.mapSize.set(shadowSize, shadowSize)
   Object.assign(sun.shadow.camera, { left: -SHADOW_RANGE, right: SHADOW_RANGE, top: SHADOW_RANGE, bottom: -SHADOW_RANGE, near: 100, far: 5200 })
   sun.shadow.bias = -0.0004
   sun.shadow.normalBias = 0.6
   sun.shadow.radius = 1.6
   scene.add(sun, sun.target)
-  scene.add(new THREE.HemisphereLight('#c7dbf2', '#7d7a58', 1.75))
+  const skyLight = new THREE.HemisphereLight('#c7dbf2', '#7d7a58', 1.75)
+  scene.add(skyLight)
 
   say('Pintando o terreno…')
+  await loadBrandFont()
   await nextFrame()
-  const terrain = await createTerrain(renderer, geo, field)
+  const terrain = await createTerrain(renderer, geo, field, load)
+  terrain.renderOrder = 2 // por último: o shader mais caro não pinta o que já está coberto
   scene.add(terrain)
 
   say('Asfaltando a pista…')
   await nextFrame()
-  scene.add(await createTrack(renderer))
+  const track = await createTrack(renderer, env)
+  scene.add(track)
 
   say('Construindo os arredores…')
   await nextFrame()
-  scene.add(buildBuildings(geo, field))
-  const trees = buildTrees(geo, field, bakeLeaves(renderer).texture)
+  const brands = await createBrandAtlas()
+  const noise = bakeNoise(renderer)
+  const kitOptions = { brands, brandRows: BRAND_ROWS, envMap: env, noise }
+  const city = new KitBuilder(2_400_000)
+  const isReplaced = (x, y) => REPLACED.some(([rx, ry]) => Math.hypot(x - rx, y - ry) < 8)
+  addBuildings(city, geo, field, isReplaced, load)
+  addTanks(city, geo, field)
+  scene.add(kitMesh(city, { ...kitOptions, variant: 'city' }))
+
+  say('Montando o fim de semana de GP…')
+  await nextFrame()
+  const paddock = geo.layers.buildings.find(({ pts }) => {
+    const n = pts.length / 2
+    let x = 0, y = 0
+    for (let i = 0; i < n; i++) {
+      x += pts[i * 2]
+      y += pts[i * 2 + 1]
+    }
+    return Math.hypot(x / n - PADDOCK_CENTER[0], y / n - PADDOCK_CENTER[1]) < 8
+  })?.pts
+  const venue = new KitBuilder(600_000)
+  const gp = addGrandPrix(venue, field, { paddock })
+  const screens = createScreens(field, venue)
+  scene.add(kitMesh(venue, { ...kitOptions, variant: 'venue' }))
+  scene.add(gp.fence, screens.mesh)
+  const pitBoards = createPitBoards(gp.pit)
+  scene.add(pitBoards.mesh)
+  scene.add(createFlags(gp.flags, seeded(77)))
+
+  // Árvore não nasce em cima do que foi montado para o GP.
+  const occupied = [
+    ...STANDS.flatMap((st) => st.front.map(([x, y]) => [x, y, st.depth + 6])),
+    ...[...MASTS, ...TENTS, ...HOSPITALITY, ...TRUCKS].map((o) => [o.x, o.y, (o.length ?? 8) * 0.7 + 3]),
+  ]
+  const trees = buildTrees(geo, field, bakeLeaves(renderer).texture, occupied, load)
   scene.add(trees.group)
-  scene.add(buildTanks(geo, field))
   const waveNormal = await loadTiled('aerial_grass_rock_nor_gl_1k', { srgb: false })
   scene.add(buildWater(field, env, waveNormal))
 
-  const cars = createCars(env)
+  const cars = createCars(renderer, env)
   scene.add(cars.group)
+  const lights = createStartLights(gp.gantries[0])
+  scene.add(lights.mesh)
 
   // faixa de bandeira amarela
   const flagMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.25, 0), toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2 })
   let flagMesh = null
   let flagKey = ''
 
-  const post = createPost(renderer, { samples: 4, bloom: true })
+  const post = createPost(renderer, { samples: quality.samples, bloom: quality.bloom })
   const rig = createCameraRig(canvas, field.heightAt)
 
   // ---------------------------------------------------------------- tamanho
@@ -218,7 +278,9 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
   const view = { w: 1, h: 1, cssW: 1, cssH: 1, dpr: 1 }
   function resize() {
     const rect = stage.getBoundingClientRect()
-    view.dpr = Math.min(1.5, window.devicePixelRatio || 1)
+    // Tela pequena borra com poucos pixels por ponto, e aguenta mais: 390 pontos a 1,5 dão um quarto de Full HD.
+    const denser = Math.min(rect.width, rect.height) < 600 ? 1.5 : 1
+    view.dpr = Math.min(quality.dpr * denser, window.devicePixelRatio || 1)
     view.cssW = Math.max(1, rect.width)
     view.cssH = Math.max(1, rect.height)
     view.w = Math.round(view.cssW * view.dpr)
@@ -248,6 +310,46 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
 
   const tags = document.getElementById('tags')
   const tagPool = new Map()
+
+  // Nomes das curvas: só na vista aberta, por fora da pista. De perto, atrapalhariam.
+  const cornerLabels = CIRCUIT.corners.map((corner) => {
+    // meio do trecho: é onde o nome faz sentido
+    const s = (corner.i + 6) * STEP
+    const p = at(s)
+    const curve = p.curve
+    const side = curve >= 0 ? -1 : 1
+    const q = at(s, side * ((side < 0 ? p.right : p.left) + 15))
+    const inner = at(s, -side * ((side < 0 ? p.left : p.right) + 15))
+    const el = document.createElement('div')
+    el.className = 'corner-label'
+    el.textContent = corner.name
+    tags.append(el)
+    return { el, world: new THREE.Vector3(q.x, q.z + 2, -q.y), other: new THREE.Vector3(inner.x, inner.z + 2, -inner.y), shown: true }
+  })
+  let labelsKey = ''
+  function updateCornerLabels(ppm) {
+    const show = ppm < 1.75
+    const c = rig.camera.position
+    const key = `${show}|${c.x.toFixed(1)}|${c.y.toFixed(1)}|${c.z.toFixed(1)}|${view.cssW}|${view.cssH}`
+    if (key === labelsKey) return
+    labelsKey = key
+    for (const label of cornerLabels) {
+      if (label.shown !== show) {
+        label.shown = show
+        label.el.classList.toggle('is-off', !show)
+      }
+      if (!show) continue
+      projected.copy(label.world).project(rig.camera)
+      let x = (projected.x * 0.5 + 0.5) * view.cssW, y = (-projected.y * 0.5 + 0.5) * view.cssH
+      // perto da borda da tela, o nome passa para o outro lado da pista
+      if (x < 80 || x > view.cssW - 80 || y < 24 || y > view.cssH - 24) {
+        projected.copy(label.other).project(rig.camera)
+        x = (projected.x * 0.5 + 0.5) * view.cssW
+        y = (-projected.y * 0.5 + 0.5) * view.cssH
+      }
+      label.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -50%)`
+    }
+  }
   const projected = new THREE.Vector3()
 
   function setTag(car, text, kind, x, y) {
@@ -293,8 +395,8 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
   function frame(dt, focusCar) {
     renderer.info.reset()
     time += dt
-    shared.uTime.value = time
     if (!REDUCED) {
+      shared.uTime.value = time
       // nuvens cruzando o céu, devagar
       shared.uCloudOffset.value.x = time * 4.2
       shared.uCloudOffset.value.y = time * 1.4
@@ -302,16 +404,25 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
     const wet = race.rain
     shared.uWet.value = wet
     post.setRain(wet)
+    sun.intensity = 3.7 * (1 - 0.62 * wet)
+    skyLight.intensity = 1.75 * (1 - 0.22 * wet)
+    track.setWet(wet)
+    lights.update(race.lights)
 
     rig.update(dt, view.w / view.h)
 
     // Distante, o carro precisa de um tamanho mínimo em pixels para continuar legível.
     const ppm = rig.pixelsPerMetre(view.cssH)
     const scale = THREE.MathUtils.clamp(19 / (5.6 * ppm), 1, 3.4)
-    trees.setDetail(ppm > 2.2)
+    trees.update(ppm > 2.2, rig.state.target, quality.treeRadius)
+    pitBoards.update(race.cars)
+    screens.update(race.cars, MODES[race.mode].title, performance.now())
     hovered = focusCar
-    cars.update(race.cars, { scale, sunDir: SUN, time, reduced: REDUCED, hovered, heightAt: field.heightAt })
+    // luz de chuva piscando na traseira, como manda o regulamento
+    const rainLight = wet > 0.15 ? (REDUCED || Math.sin(time * 26) > -0.2 ? 1 : 0.12) : 0
+    cars.update(race.cars, { dt, scale, sunDir: SUN, time, reduced: REDUCED, hovered, heightAt: field.heightAt, rainLight, wet })
     updateFlags()
+    updateCornerLabels(ppm)
 
     // Fumaça e efeitos ficam em cima da imagem; o resto está na cena.
     renderer.setRenderTarget(post.target)
@@ -319,7 +430,7 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
     renderer.render(scene, rig.camera)
     lastInfo.calls = renderer.info.render.calls
     lastInfo.triangles = renderer.info.render.triangles
-    post.render(time)
+    post.render(REDUCED ? 0 : time)
 
     for (const car of race.cars.values()) {
       const box = car.state === 'toBox' || car.state === 'inPit'
@@ -366,6 +477,16 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
     follow: (car) => rig.follow(car),
     /** Números para o teste automático e para o medidor de desempenho. */
     info: () => lastInfo,
+    quality: () => quality.name,
+    /** Desce um nível. Devolve false se já estiver no mais leve. */
+    lowerQuality() {
+      const next = QUALITY[QUALITY.indexOf(quality) + 1]
+      if (!next) return false
+      quality = next
+      post.setQuality(next)
+      resize()
+      return true
+    },
   }
 }
 

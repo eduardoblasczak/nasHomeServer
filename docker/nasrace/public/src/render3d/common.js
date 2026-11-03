@@ -127,6 +127,102 @@ float fbm(vec2 p, int octaves) {
 }
 `
 
+/** Ruído periódico para os materiais lerem por textura: duas escalas e uma variação por canal. */
+export function bakeNoise(renderer) {
+  const target = new THREE.WebGLRenderTarget(256, 256, {
+    type: THREE.UnsignedByteType,
+    wrapS: THREE.RepeatWrapping,
+    wrapT: THREE.RepeatWrapping,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: true,
+    depthBuffer: false,
+  })
+  bakeToTarget(renderer, target, new THREE.ShaderMaterial({
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: /* glsl */ `
+      precision highp float;
+      varying vec2 vUv;
+      ${NOISE_GLSL}
+      float tile(vec2 p, float period, float seed) {
+        vec2 q = p * period;
+        vec2 i = floor(q), f = fract(q);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        float a = hash21(mod(i, period) + seed), b = hash21(mod(i + vec2(1, 0), period) + seed);
+        float c = hash21(mod(i + vec2(0, 1), period) + seed), d = hash21(mod(i + vec2(1, 1), period) + seed);
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+      }
+      float layers(vec2 p, float seed) {
+        return tile(p, 4.0, seed) * 0.5 + tile(p, 8.0, seed) * 0.26 + tile(p, 16.0, seed) * 0.14 + tile(p, 32.0, seed) * 0.1;
+      }
+      void main() {
+        gl_FragColor = vec4(layers(vUv, 1.0), layers(vUv, 37.0), layers(vUv * 1.0, 71.0), layers(vUv, 113.0));
+      }
+    `,
+    depthTest: false,
+    depthWrite: false,
+  }))
+  return target.texture
+}
+
+/** Espera a GPU terminar o que já recebeu, sem travar a página. */
+function gpuIdle(gl) {
+  return new Promise((resolve) => {
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+    if (!sync) {
+      resolve() // contexto perdido: não há o que esperar
+      return
+    }
+    gl.flush()
+    const check = () => {
+      if (gl.clientWaitSync(sync, 0, 0) === gl.TIMEOUT_EXPIRED) {
+        setTimeout(check, 1)
+      } else {
+        gl.deleteSync(sync)
+        resolve()
+      }
+    }
+    setTimeout(check, 0)
+  })
+}
+
+/**
+ * Como `bakeToTarget`, mas em `tiles` x `tiles` ladrilhos, um de cada vez. Um único desenho de tela
+ * cheia numa textura grande não pode ser interrompido, e o Windows reinicia o driver de vídeo se um
+ * comando passar de 2 s (evento 153 do nvlddmkm, visto na RTX 3050 com outro programa usando a placa).
+ */
+export async function bakeInTiles(renderer, target, material, tiles) {
+  const scene = new THREE.Scene()
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material)
+  mesh.frustumCulled = false
+  scene.add(mesh)
+  const gl = renderer.getContext()
+  const previous = renderer.getRenderTarget()
+  const texture = target.texture
+  const wantsMips = texture.generateMipmaps
+  renderer.setRenderTarget(target) // reserva a textura, já com os níveis de mipmap
+  renderer.clear()
+  await gpuIdle(gl)
+  target.scissorTest = true
+  const w = target.width / tiles, h = target.height / tiles
+  for (let y = 0; y < tiles; y++) {
+    for (let x = 0; x < tiles; x++) {
+      // o renderizador refaria os mipmaps a cada desenho: só no último
+      texture.generateMipmaps = wantsMips && y === tiles - 1 && x === tiles - 1
+      target.scissor.set(x * w, y * h, w, h)
+      renderer.setRenderTarget(target)
+      renderer.render(scene, camera)
+      await gpuIdle(gl)
+    }
+  }
+  texture.generateMipmaps = wantsMips
+  target.scissorTest = false
+  renderer.setRenderTarget(previous)
+  mesh.geometry.dispose()
+  material.dispose()
+}
+
 /** Executa um shader de tela cheia numa textura, uma vez só. */
 export function bakeToTarget(renderer, target, material) {
   const scene = new THREE.Scene()
