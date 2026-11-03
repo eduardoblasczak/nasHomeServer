@@ -6,7 +6,8 @@
 //   muro       = offline   equipe = sistema ao qual o container pertence
 // Só o que é medido muda o estado dos carros.
 
-import { at, cornerName, GARAGES, LENGTH, mod, N, PACE, pitAt, PIT_IN, PIT_LENGTH, PIT_OUT, racingOffset, STEP } from './circuit.js'
+import { at, cornerName, GARAGES, garageCenter, LENGTH, mod, paceAt, pitAt, PIT_IN, PIT_LENGTH, PIT_OUT, racingOffset } from './circuit.js'
+import { barrierAt } from './venue.js'
 
 // ============================================================ equipes
 
@@ -26,17 +27,33 @@ const DRIVERS = {
   'nasfinance-app': ['FIN', 'finance'], 'nasfinance-db': ['FDB', 'finance'],
   'portfolio-web': ['POR', 'portfolio'], 'portfolio-telemetry': ['TEL', 'portfolio'],
   'voalberto-site': ['VOA', 'voalberto'],
-  prometheus: ['PRM', 'monitor'], grafana: ['GRF', 'monitor'], cadvisor: ['CAD', 'monitor'], 'node-exporter': ['NOD', 'monitor'], 'nas-pulse': ['PLS', 'monitor'],
+  prometheus: ['PRM', 'monitor'], grafana: ['GRF', 'monitor'], cadvisor: ['CAD', 'monitor'], 'node-exporter': ['NOD', 'monitor'], 'nas-pulse': ['PLS', 'monitor'], nasrace: ['NSR', 'monitor'],
   cloudflared: ['CFD', 'infra'], adguardhome: ['ADG', 'infra'], 'nginx-proxy-manager': ['NPM', 'infra'], portainer: ['PTN', 'infra'], 'ai-memory': ['MEM', 'infra'],
 }
 
 const driver = (name) => DRIVERS[name] ?? [name.replace(/[^a-z0-9]/gi, '').slice(0, 3).toUpperCase(), 'infra']
+
+// Cada serviço tem sempre o mesmo box, com as equipes lado a lado. Serviço novo pega o próximo livre.
+const SLOT_ORDER = Object.keys(DRIVERS)
+function slotFor(name) {
+  const known = SLOT_ORDER.indexOf(name)
+  if (known >= 0) return known
+  const taken = new Set([...race.cars.values()].map((car) => car.slot))
+  for (let slot = SLOT_ORDER.length; slot < GARAGES.slots; slot++) if (!taken.has(slot)) return slot
+  return race.cars.size % GARAGES.slots
+}
 
 // ============================================================ regras
 
 const WARMUP_S = 300 // tempo para aprender o normal de cada serviço
 const BOX_MIN_S = 10
 const GRID_GAP = 8
+const LIGHT_MS = 850 // cinco luzes, uma a cada 0,85 s
+const LAUNCH_ACCEL = 14 // m/s² na saída do grid
+const OVERTAKE_GAP = 16
+const CAR_LENGTH = 6.2
+const LANE_CLEAR = 2.6 // em unidades de faixa: abaixo disso, os dois carros ocupam o mesmo espaço
+const BAY_OFFSET = 4.1 // a vaga fica 4,1 m ao lado da via rápida
 
 /**
  * Peso de 0 a 1: quanto o serviço consome. CPU pesa mais porque muda a cada leitura; memória
@@ -69,7 +86,7 @@ export const packetRate = (bps) => (bps ? Math.min(5, Math.log10(1 + bps / 256))
 
 function loadMode() {
   try {
-    const saved = localStorage.getItem('interlagos-modo')
+    const saved = localStorage.getItem('nasrace-modo')
     if (MODES[saved]) return saved
   } catch {
     // armazenamento bloqueado: fica o padrão
@@ -80,11 +97,16 @@ function loadMode() {
 export const race = {
   cars: new Map(),
   host: null,
-  pulseState: 'esperando', // tailnet | publica | sem-sinal | esperando
+  pulseState: 'esperando', // ao-vivo | sem-sinal | esperando
   telemetryLost: false,
   rain: 0,
   mode: loadMode(),
   firstAt: null,
+  // largada: cinco luzes acendem, apagam e os carros saem. Quem não tem luzes liga `racing` direto.
+  racing: false,
+  sequenceAt: null,
+  lights: 0,
+  fastest: null, // { car, time }: melhor volta da sessão, medida na própria corrida
   overrides: new Map(), // nome -> { up?, cpu? }: só a simulação
   onMessage: () => {},
   onRoster: () => {},
@@ -99,6 +121,9 @@ const lapTime = (weight) => MODES[race.mode].lap(weight)
 const slowestLap = () => Math.max(lapTime(0), lapTime(1))
 const gridKey = (data) => (data.cpu == null ? Infinity : MODES[race.mode].grid(weightOf(data)))
 
+/** Velocidade média de volta desse carro agora, em m/s: serve para converter distância em tempo. */
+export const averageSpeed = (car) => LENGTH / (car.data.cpu == null ? slowestLap() : lapTime(car.weight ?? weightOf(car.data)))
+
 export const isWarming = () => race.firstAt != null && (performance.now() - race.firstAt) / 1000 < WARMUP_S
 const say = (text) => race.onMessage(text)
 
@@ -106,18 +131,23 @@ function gridSlot(car, index) {
   car.dist = -index * GRID_GAP
   car.s = mod(car.dist - 10)
   car.lane = car.laneTarget = index % 2 ? 3.2 : -3.2
+  car.laneV = 0
+  car.clearT = 0
+  car.vNow = 0
+  car.launching = true
   car.gridIndex = index
 }
 
 function newCar(name, index) {
   const [code, teamId] = driver(name)
+  const slot = slotFor(name)
   const car = {
-    name, code, team: TEAMS[teamId], index,
+    name, code, team: TEAMS[teamId], index, slot,
     data: { name, up: true },
     dist: 0, s: 0, lane: 0, laneTarget: 0, gridIndex: index,
     state: 'run', // run | toBox | inPit | out
     pitDist: 0,
-    boxAt: GARAGES.from + 6 + ((index % 21) + 0.5) * ((GARAGES.to - GARAGES.from - 12) / 21), // diante da garagem
+    boxAt: garageCenter(slot), // diante da garagem
     pitUntil: 0, pitReason: '', pitCount: 0,
     outAt: null, crashT: 0, crashFrom: 0, crashTo: 0,
     crashSide: index % 2 ? 1 : -1, crashSpin: (index % 2 ? 1 : -1) * 0.65,
@@ -132,24 +162,10 @@ function newCar(name, index) {
 
 // ============================================================ feed
 
-export function applyData(services) {
-  const pulse = services.pulseOk ? services.pulse : null
-  const tel = services.telemetryOk ? services.telemetry : null
-  if (pulse) {
-    race.pulseState = 'tailnet'
-    race.host = pulse.host
-  } else if (tel) {
-    race.pulseState = 'publica'
-    race.host = { cpu: tel.cpu, ram: tel.ram, temp: tel.temp, disks: [] }
-  } else {
-    race.pulseState = services.pulseOk === null && services.telemetryOk === null ? 'esperando' : 'sem-sinal'
-  }
-
-  const list = pulse ? pulse.containers : tel ? tel.containers.map((c) => ({ name: c.name, up: c.up, cpu: null })) : null
-  if (!list) {
-    race.onUpdate()
-    return
-  }
+export function applyPulse(pulse) {
+  race.pulseState = 'ao-vivo'
+  race.host = pulse.host
+  const list = pulse.containers
 
   // Grid inicial: na ordem do modo escolhido; sem métrica, no fim.
   const cars = race.cars
@@ -159,13 +175,13 @@ export function applyData(services) {
     race.onRoster()
   }
 
-  const fresh = pulse && pulse.generatedAt !== lastPulseAt
-  if (pulse) lastPulseAt = pulse.generatedAt
+  const fresh = pulse.generatedAt !== lastPulseAt
+  lastPulseAt = pulse.generatedAt
 
   // Nem todos caem juntos: mais da metade fora é a medição que parou (cadvisor ou Prometheus).
   const seen = new Map(list.map((c) => [c.name, c]))
   const upCount = list.filter((c) => c.up).length
-  const measuringBroke = Boolean(pulse && upCount < cars.size / 2)
+  const measuringBroke = upCount < cars.size / 2
   if (measuringBroke !== race.telemetryLost) {
     race.telemetryLost = measuringBroke
     if (measuringBroke) say('Telemetria perdida: a medição parou, não os serviços')
@@ -184,7 +200,7 @@ export function applyData(services) {
     const raw = seen.get(car.name)
     const sim = race.overrides.get(car.name)
     // Um container parado some das métricas depois de alguns minutos: o carro continua no muro.
-    const data = { ...(raw ?? { name: car.name, up: pulse ? false : car.data.up }), ...(sim ?? {}) }
+    const data = { ...(raw ?? { name: car.name, up: false }), ...(sim ?? {}) }
     car.data = data
     if (race.telemetryLost) continue
 
@@ -248,10 +264,10 @@ export function crash(car) {
   car.state = 'out'
   car.outAt = performance.now()
   car.crashT = 0
-  const p = at(car.s)
-  const width = car.crashSide > 0 ? p.left : p.right
   car.crashFrom = laneOffset(car)
-  car.crashTo = car.crashSide * (width + 5)
+  car.crashSpeed = car.speed
+  // para perto da barreira: a parede de verdade está ali
+  car.crashTo = car.crashSide * Math.max(at(car.s)[car.crashSide > 0 ? 'left' : 'right'] + 1.5, barrierAt(car.s, car.crashSide) - 1.7)
   say(`${car.code} bateu em ${cornerName(car.s)}: serviço offline`)
 }
 
@@ -272,6 +288,8 @@ function placeOnTrack(car) {
   car.y = p.y
   car.z = p.z
   car.heading = Math.atan2(next.y - p.y, next.x - p.x)
+  // mudar de faixa aponta o carro para o lado para onde ele está indo
+  if (car.state !== 'out' && car.laneV) car.heading += Math.atan2(car.laneV * 0.75, Math.max(14, car.speed))
   car.slope = (next.z - p.z) / 5
 }
 
@@ -285,6 +303,18 @@ export function step(dt) {
   const list = [...race.cars.values()]
   if (race.pulseState === 'sem-sinal' || race.telemetryLost) return // congela: não dá para saber o que está acontecendo
 
+  if (!race.racing && list.length) {
+    const now = performance.now()
+    race.sequenceAt ??= now
+    const t = now - race.sequenceAt
+    race.lights = Math.min(5, Math.floor(t / LIGHT_MS))
+    if (t > LIGHT_MS * 5 + 700) {
+      race.lights = 0
+      race.racing = true
+      say('Luzes apagadas: largada!')
+    }
+  }
+
   for (const car of list) {
     const d = car.data
     const noData = d.cpu == null
@@ -292,9 +322,12 @@ export function step(dt) {
     car.weight = car.weight == null ? targetWeight : car.weight + (targetWeight - car.weight) * Math.min(1, dt * 0.6)
 
     if (car.state === 'out') {
-      car.crashT = Math.min(1, car.crashT + dt / 0.7)
+      car.crashT = Math.min(1, car.crashT + dt / 1.1)
       const k = 1 - (1 - car.crashT) ** 3
       car.crashOffset = car.crashFrom + (car.crashTo - car.crashFrom) * k
+      // ainda escorrega adiante até perder a velocidade: não existe parada instantânea
+      car.speed = (car.crashSpeed ?? 0) * (1 - car.crashT) ** 2
+      car.s = mod(car.s + car.speed * dt)
       placeOnTrack(car)
       car.heading += car.crashSpin * k
       continue
@@ -307,7 +340,11 @@ export function step(dt) {
         car.speed = 0
       } else {
         // Limite de velocidade só diante das garagens; o resto do pit lane é a longa saída.
-        car.speed = car.pitDist > GARAGES.to || car.pitDist < GARAGES.from - 40 ? 55 : 22
+        let limit = car.pitDist > GARAGES.to || car.pitDist < GARAGES.from - 40 ? 55 : 22
+        const toBox = car.boxAt - car.pitDist
+        if (toBox > 0 && toBox < 45) limit = Math.min(limit, Math.max(4, Math.sqrt(2 * 7 * toBox)))
+        // sai do box acelerando, e não de uma vez
+        car.speed = Math.min(limit, car.speed + 11 * dt)
         if (car.pitDist < car.boxAt && car.pitDist + car.speed * dt >= car.boxAt) {
           car.pitDist = car.boxAt
           car.pitUntil = now + BOX_MIN_S * 1000
@@ -321,25 +358,72 @@ export function step(dt) {
         car.pitReason = ''
         car.hot = 0
         car.s = PIT_OUT
+        car.lane = car.laneTarget = 0
+        car.lapStart = null // volta com parada não compete com as outras
         say(`${car.code} voltou à pista`)
       } else {
+        // entra de lado na vaga, diante da garagem, e volta para a via rápida ao sair
+        const bay = (d) => {
+          const near = Math.abs(d - car.boxAt)
+          const t = Math.max(0, Math.min(1, (20 - near) / 16))
+          return BAY_OFFSET * t * t * (3 - 2 * t)
+        }
+        const lateral = bay(car.pitDist)
         const p = pitAt(car.pitDist)
-        car.x = p.x
-        car.y = p.y
+        car.x = p.x - p.ty * lateral
+        car.y = p.y + p.tx * lateral
         car.z = p.z
-        car.heading = Math.atan2(p.ty, p.tx)
+        car.heading = Math.atan2(p.ty, p.tx) + Math.atan2(bay(car.pitDist + 2) - lateral, 2)
         car.slope = 0
         continue
       }
     }
 
-    const i = Math.floor(mod(car.s) / STEP) % N
-    let v = (LENGTH / (noData ? slowestLap() : lapTime(car.weight))) * PACE[i]
-    if (car.state === 'toBox') v = Math.max(v, 55 * PACE[i])
+    // Nas luzes de largada, o grid espera parado.
+    if (!race.racing && car.state === 'run') {
+      car.speed = 0
+      placeOnTrack(car)
+      continue
+    }
+
+    let v = (LENGTH / (noData ? slowestLap() : lapTime(car.weight))) * paceAt(car.s)
+    if (car.state === 'toBox') v = Math.max(v, 55 * paceAt(car.s))
+    if (car.launching) {
+      car.vNow = Math.min(v, car.vNow + LAUNCH_ACCEL * dt)
+      if (car.vNow >= v) car.launching = false
+      v = car.vNow
+    }
+
+    // Quem vai à frente, na mesma faixa e perto o bastante para pedir uma decisão.
+    let ahead = null
+    let nearest = OVERTAKE_GAP + v * 0.25
+    for (const other of list) {
+      if (other === car || other.state === 'inPit' || other.state === 'out') continue
+      const gap = mod(other.s - car.s)
+      if (gap < nearest && Math.abs(other.lane - car.lane) < LANE_CLEAR) {
+        nearest = gap
+        ahead = other
+      }
+    }
+    // Sem espaço para passar, espera atrás: um carro não atravessa o outro.
+    if (ahead && nearest < CAR_LENGTH) v = Math.min(v, ahead.speed)
+
     const before = mod(car.s)
     car.s = mod(car.s + v * dt)
     car.dist += v * dt
     car.speed = v
+
+    // Cruzou a linha: a volta só conta se saiu de uma passagem anterior, e não do grid.
+    if (car.s < before && car.state === 'run') {
+      const now = performance.now()
+      if (car.lapStart != null) {
+        const time = (now - car.lapStart) / 1000
+        car.lastLap = time
+        if (car.bestLap == null || time < car.bestLap) car.bestLap = time
+        if (!race.fastest || time < race.fastest.time) race.fastest = { car, time }
+      }
+      car.lapStart = now
+    }
 
     if (car.state === 'toBox') {
       const crossed = before <= PIT_IN ? before + v * dt >= PIT_IN : before + v * dt - LENGTH >= PIT_IN
@@ -350,16 +434,18 @@ export function step(dt) {
       }
     }
 
-    // Ultrapassagem: chegou perto de quem vai à frente, muda de lado.
-    let ahead = Infinity
-    for (const other of list) {
-      if (other === car || other.state === 'inPit' || other.state === 'out') continue
-      const gap = mod(other.s - car.s)
-      if (gap < ahead && gap < 15 && Math.abs(other.lane - car.lane) < 2.4) ahead = gap
+    // Ultrapassagem: chegou perto de quem vai à frente, sai para o lado livre e volta depois de passar.
+    if (ahead) {
+      car.clearT = 0
+      if (Math.abs(car.laneTarget - ahead.lane) < LANE_CLEAR) car.laneTarget = ahead.lane >= 0 ? -3.2 : 3.2
+    } else {
+      car.clearT += dt
+      if (car.clearT > 2.2) car.laneTarget = 0 // de volta à linha de corrida
     }
-    if (ahead < 15) car.laneTarget = car.laneTarget > 0 ? -3.2 : 3.2
-    else if (Math.abs(car.laneTarget) > 0 && Math.random() < dt * 0.25) car.laneTarget = 0 // volta para a linha quando há espaço
-    car.lane += (car.laneTarget - car.lane) * Math.min(1, dt * 1.2)
+    // mola amortecida: entra e sai da faixa em uma curva suave, sem tranco
+    const pull = 2.6 * (car.laneTarget - car.lane) - 3.2 * car.laneV
+    car.laneV += pull * dt
+    car.lane += car.laneV * dt
     placeOnTrack(car)
   }
 }
@@ -371,10 +457,15 @@ export function setMode(next) {
   if (next === race.mode) return false
   race.mode = next
   try {
-    localStorage.setItem('interlagos-modo', next)
+    localStorage.setItem('nasrace-modo', next)
   } catch {
     // sem armazenamento: vale só até recarregar a página
   }
+  race.racing = false
+  race.sequenceAt = null
+  race.lights = 0
+  race.fastest = null
+  for (const car of race.cars.values()) car.lapStart = car.bestLap = car.lastLap = null
   const ready = [...race.cars.values()].filter((car) => car.state === 'run').sort((a, b) => gridKey(a.data) - gridKey(b.data))
   ready.forEach((car, i) => {
     gridSlot(car, i)
