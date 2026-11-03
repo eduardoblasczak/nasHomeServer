@@ -52,21 +52,39 @@ export function at(s, d = 0) {
   }
 }
 
-// Carros tiram o pé nas curvas. A média é normalizada para o tempo de volta valer de verdade.
+// Perfil de velocidade de um carro de verdade: limite de aderência em cada curva, freada forte e
+// curta antes dela, aceleração que perde força conforme a velocidade sobe. A média é normalizada,
+// para o tempo de volta medido continuar valendo: o perfil só decide onde ele ganha e perde tempo.
 export const PACE = (() => {
-  const raw = P.map((_, i) => {
-    let c = 0
-    for (let j = -3; j <= 6; j++) c = Math.max(c, Math.abs(P[(i + j + N) % N].curve))
-    return 1 / (0.75 + Math.min(1.6, c * 45))
+  const GRIP = 30, BRAKE = 42, ENGINE = 14, TOP = 94
+  const v = P.map((_, i) => {
+    let c = 1e-4
+    for (let j = -2; j <= 2; j++) c = Math.max(c, Math.abs(P[(i + j + N) % N].curve))
+    return Math.min(TOP, Math.sqrt(GRIP / c))
   })
-  const smooth = raw.map((_, i) => {
-    let sum = 0
-    for (let j = -6; j <= 6; j++) sum += raw[(i + j + N) % N]
-    return sum / 13
-  })
-  const harmonic = smooth.reduce((sum, v) => sum + 1 / v, 0) / N
-  return smooth.map((v) => v * harmonic)
+  for (let pass = 0; pass < 3; pass++) {
+    for (let k = 0; k < N * 2; k++) {
+      const i = k % N, j = (k + 1) % N
+      const a = ENGINE * (1 - v[i] / (TOP * 1.12))
+      v[j] = Math.min(v[j], Math.sqrt(v[i] * v[i] + 2 * a * STEP))
+    }
+    for (let k = N * 2; k > 0; k--) {
+      const i = k % N, j = (k - 1 + N) % N
+      v[j] = Math.min(v[j], Math.sqrt(v[i] * v[i] + 2 * BRAKE * STEP))
+    }
+  }
+  const smooth = v.map((_, i) => (v[(i - 1 + N) % N] + 2 * v[i] + v[(i + 1) % N]) / 4)
+  const harmonic = smooth.reduce((sum, value) => sum + 1 / value, 0) / N
+  return smooth.map((value) => value * harmonic)
 })()
+
+/** Ritmo relativo numa posição da pista, sem degrau entre as estações. */
+export function paceAt(s) {
+  const f = mod(s) / STEP
+  const i = Math.floor(f) % N
+  const k = f - Math.floor(f)
+  return PACE[i] + (PACE[(i + 1) % N] - PACE[i]) * k
+}
 
 /**
  * Linha de corrida: deslocamento lateral em cada ponto, por minimização de curvatura com a
@@ -136,6 +154,35 @@ function resamplePit(raw, spacing) {
 /** O pit lane do OpenStreetMap tem cantos: reamostrado em curva suave, de 3 em 3 m. */
 export const PIT = resamplePit(CIRCUIT.pit, 3)
 
+// A altitude do pit lane vem de outra fonte que a da pista. Lado a lado, sobrava um degrau de mais
+// de 1 m entre as duas: onde ele corre colado à pista, segue a altitude dela.
+{
+  const wanted = PIT.map((p) => {
+    let best = 0
+    let dist = Infinity
+    for (let i = 0; i < N; i++) {
+      const d = (P[i].x - p.x) ** 2 + (P[i].y - p.y) ** 2
+      if (d < dist) {
+        dist = d
+        best = i
+      }
+    }
+    const k = Math.min(1, Math.max(0, (Math.sqrt(dist) - 30) / 35))
+    return P[best].z - 0.08 + (p.z - P[best].z + 0.08) * k
+  })
+  PIT.forEach((p, i) => {
+    let sum = 0, count = 0
+    for (let j = -8; j <= 8; j++) {
+      const v = wanted[i + j]
+      if (v !== undefined) {
+        sum += v
+        count++
+      }
+    }
+    p.z = sum / count
+  })
+}
+
 export const nearestStation = (p) => {
   let best = 0
   let dist = Infinity
@@ -157,7 +204,10 @@ for (let i = 1; i < PIT.length; i++) pitCum.push(pitCum[i - 1] + Math.hypot(PIT[
 export const PIT_LENGTH = pitCum[pitCum.length - 1]
 
 /** Trecho do pit lane diante do prédio dos boxes, em metros desde a entrada. */
-export const GARAGES = { from: 345, to: 680 }
+export const GARAGES = { from: 390, to: 680, slots: 24 }
+
+/** Centro de cada box, em metros de pit lane. */
+export const garageCenter = (slot) => GARAGES.from + 6 + ((slot + 0.5) * (GARAGES.to - GARAGES.from - 12)) / GARAGES.slots
 
 export function pitAt(dist) {
   const d = Math.max(0, Math.min(PIT_LENGTH, dist))
