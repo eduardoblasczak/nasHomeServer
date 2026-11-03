@@ -16,7 +16,7 @@ function paintTrackMap(renderer) {
   const c = document.createElement('canvas')
   c.width = MAP_W
   c.height = MAP_H
-  const g = c.getContext('2d')
+  const g = c.getContext('2d', { willReadFrequently: true }) // na CPU, como o chão: milhares de retângulos
   const rand = seeded(90210)
   // unidade do desenho: metros. x = s, y = deslocamento lateral (esquerda positiva).
   g.setTransform(MAP_W / LENGTH, 0, 0, MAP_H / (2 * HALF), 0, MAP_H / 2)
@@ -378,7 +378,7 @@ function paintPitMap() {
   const c = document.createElement('canvas')
   c.width = W
   c.height = H
-  const g = c.getContext('2d')
+  const g = c.getContext('2d', { willReadFrequently: true })
   const rand = seeded(5150)
   g.setTransform(W / PIT_LENGTH, 0, 0, H / (2 * HALF_W), 0, H / 2)
   g.fillStyle = 'rgb(82,83,84)'
@@ -405,8 +405,8 @@ function paintPitMap() {
   // via de trabalho diante das garagens: linha contínua e os boxes marcados
   g.fillStyle = 'rgba(236,236,230,0.92)'
   g.fillRect(GARAGES.from, 1.2, GARAGES.to - GARAGES.from, 0.18)
-  const each = (GARAGES.to - GARAGES.from - 12) / 21
-  for (let n = 0; n < 21; n++) {
+  const each = (GARAGES.to - GARAGES.from - 12) / GARAGES.slots
+  for (let n = 0; n < GARAGES.slots; n++) {
     const x = GARAGES.from + 6 + n * each
     g.fillStyle = 'rgba(236,236,230,0.85)'
     g.fillRect(x, 1.2, 0.2, 6)
@@ -498,6 +498,7 @@ const asphaltPatch = (key, map, asphalt, asphaltN, avg, tracks, avgTracks) => ({
     uniform sampler2D uTrackMap, uAsphalt, uAsphaltN, uTracks;
     uniform vec3 uAvgAsphalt, uAvgTracks;
     float trackRubber;
+    float trackPuddle;
   `,
   fragment: [
     ['#include <map_fragment>', /* glsl */ `
@@ -509,11 +510,13 @@ const asphaltPatch = (key, map, asphalt, asphaltN, avg, tracks, avgTracks) => ({
         float luma = dot(paint, vec3(0.33));
         float isPaint = smoothstep(0.32, 0.6, luma);
         float detail = mix(mix(1.0, a, 0.75) * mix(1.0, t, 0.5), mix(1.0, a, 0.25), isPaint);
-        diffuseColor.rgb = paint * detail;
+        // molhado, o asfalto escurece e a água junta nas partes baixas
+        diffuseColor.rgb = paint * detail * mix(1.0, 0.58, uWet);
         trackRubber = 1.0 - smoothstep(0.03, 0.08, luma);
+        trackPuddle = smoothstep(0.86, 1.1, t) * uWet;
       }
     `],
-    ['#include <roughnessmap_fragment>', 'float roughnessFactor = mix(0.86, 0.66, trackRubber) - 0.5 * uWet;'],
+    ['#include <roughnessmap_fragment>', 'float roughnessFactor = mix(mix(0.86, 0.66, trackRubber), mix(0.3, 0.08, trackPuddle), uWet);'],
     ['#include <normal_fragment_maps>', /* glsl */ `
       {
         vec2 nn = (texture2D(uAsphaltN, vWPos.xz / 2.9).xy * 2.0 - 1.0) * 0.5;
@@ -525,7 +528,7 @@ const asphaltPatch = (key, map, asphalt, asphaltN, avg, tracks, avgTracks) => ({
   ],
 })
 
-export async function createTrack(renderer) {
+export async function createTrack(renderer, envMap) {
   const [asphalt, asphaltN, tracks] = await Promise.all([
     loadTiled('asphalt_track_diff_1k'),
     loadTiled('asphalt_track_nor_gl_1k', { srgb: false }),
@@ -536,7 +539,7 @@ export async function createTrack(renderer) {
   const trackMap = paintTrackMap(renderer)
   const trackMesh = new THREE.Mesh(
     buildTrackGeometry(),
-    atmospheric(new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 }), asphaltPatch('track', trackMap, asphalt, asphaltN, asphalt.average, tracks, tracks.average)),
+    atmospheric(new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, envMap, envMapIntensity: 0.25 }), asphaltPatch('track', trackMap, asphalt, asphaltN, asphalt.average, tracks, tracks.average)),
   )
   trackMesh.receiveShadow = true
   trackMesh.frustumCulled = false
@@ -545,7 +548,7 @@ export async function createTrack(renderer) {
   const { texture: pitMap, halfWidth } = paintPitMap()
   const pitMesh = new THREE.Mesh(
     buildPitGeometry(halfWidth),
-    atmospheric(new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 }), asphaltPatch('pit', pitMap, asphalt, asphaltN, asphalt.average, tracks, tracks.average)),
+    atmospheric(new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, envMap, envMapIntensity: 0.25 }), asphaltPatch('pit', pitMap, asphalt, asphaltN, asphalt.average, tracks, tracks.average)),
   )
   pitMesh.receiveShadow = true
   pitMesh.frustumCulled = false
@@ -559,6 +562,9 @@ export async function createTrack(renderer) {
   kerbs.frustumCulled = false
   group.add(kerbs)
 
+  group.setWet = (wet) => {
+    trackMesh.material.envMapIntensity = pitMesh.material.envMapIntensity = 0.25 + wet * 0.5
+  }
   return group
 }
 

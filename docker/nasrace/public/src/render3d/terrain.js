@@ -3,8 +3,9 @@
 // só lê texturas, e é isso que deixa folga para os 144 Hz.
 
 import { at, CIRCUIT, N, P, PIT, STEP } from '../circuit.js'
-import { CLAY, LAWNS, PAINT, PATCHES, PATHS, PAVED, RUNOFF, SITE } from '../surfaces.js'
-import { atmospheric, bakeToTarget, loadTiled, NOISE_GLSL, seeded, smoothstep, THREE } from './common.js'
+import { CLAY, LAWNS, LOGOS, PAINT, PATCHES, PATHS, PAVED, RUNOFF, SITE } from '../surfaces.js'
+import { FONT } from './brands.js'
+import { atmospheric, bakeInTiles, loadTiled, NOISE_GLSL, seeded, smoothstep, THREE } from './common.js'
 
 const MESH_STEP = 8
 const area = CIRCUIT.area
@@ -155,7 +156,9 @@ export function buildTerrainGeometry({ nx, ny, h }) {
 function canvasLayer(size, region) {
   const c = document.createElement('canvas')
   c.width = c.height = size
-  const g = c.getContext('2d')
+  // Na CPU: acelerado, cada `filter: blur` numa tela de 4096 px vira trabalho pesado para a placa de
+  // vídeo, tudo enviado de uma vez ao usar a imagem como textura.
+  const g = c.getContext('2d', { willReadFrequently: true })
   const kx = size / (region.maxX - region.minX)
   const ky = size / (region.maxY - region.minY)
   g.setTransform(kx, 0, 0, -ky, -region.minX * kx, region.maxY * ky)
@@ -189,18 +192,35 @@ function paintLayer(geo, region, size) {
       l.fill()
     }
   }
-  // Canto arredondado e borda difusa: corta o aspecto de recorte dos polígonos traçados à mão.
-  const fillRounded = (points, colorStyle, maskStyle, grow, soft) => {
+  // Borda difusa, para tirar o aspecto de recorte dos polígonos traçados à mão. O grupo inteiro é
+  // desenhado à parte e desfocado uma vez: um `filter` por polígono custaria uma tela de 4096 px a cada um.
+  const scratch = canvasLayer(size, region)
+  const softGroup = (layer, soft, draw) => {
+    const s = scratch.g
+    s.save()
+    s.setTransform(1, 0, 0, 1, 0, 0)
+    s.clearRect(0, 0, size, size)
+    s.restore()
+    draw(s)
+    const g = layer.g
+    g.save()
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.filter = `blur(${Math.max(1, Math.round(soft * layer.k))}px)`
+    g.drawImage(scratch.c, 0, 0)
+    g.restore()
+  }
+  /** Polígonos engordados `grow` metros: o traço arredonda os cantos. */
+  const softFill = (zones, maskStyle, grow, soft) => {
     for (const layer of [color, mask]) {
-      const l = layer.g
-      l.save()
-      l.filter = `blur(${Math.max(1, Math.round(soft * layer.k))}px)`
-      l.fillStyle = l.strokeStyle = layer === color ? colorStyle : maskStyle
-      l.lineWidth = grow * 2
-      tracePoly(l, points)
-      l.fill()
-      l.stroke()
-      l.restore()
+      softGroup(layer, soft, (s) => {
+        s.lineWidth = grow * 2
+        for (const zone of zones) {
+          s.fillStyle = s.strokeStyle = layer === color ? zone.color : maskStyle
+          tracePoly(s, zone.points)
+          s.fill()
+          s.stroke()
+        }
+      })
     }
   }
   const MASK_PAVED = 'rgb(255,0,255)'
@@ -319,35 +339,34 @@ function paintLayer(geo, region, size) {
     }
   }
 
-  for (const zone of PAVED) {
-    if (zone.soft) {
-      // borda difusa: a mancha se funde ao que está em volta
-      color.g.save()
-      color.g.filter = `blur(${Math.round(zone.soft * color.k)}px)`
-      color.g.globalAlpha = zone.alpha ?? 1
-      color.g.fillStyle = zone.color
-      tracePoly(color.g, zone.points)
-      color.g.fill()
-      color.g.restore()
-      mask.g.fillStyle = MASK_PAVED
-      tracePoly(mask.g, zone.points)
-      mask.g.fill()
-    } else {
-      fillBoth((l) => tracePoly(l, zone.points), zone.color, MASK_PAVED)
+  for (const zone of PAVED) if (!zone.soft) fillBoth((l) => tracePoly(l, zone.points), zone.color, MASK_PAVED)
+  // as manchas se fundem ao que está em volta
+  const softPaved = PAVED.filter((zone) => zone.soft)
+  softGroup(color, 0.8, (s) => {
+    for (const zone of softPaved) {
+      s.globalAlpha = zone.alpha ?? 1
+      s.fillStyle = zone.color
+      tracePoly(s, zone.points)
+      s.fill()
     }
+    s.globalAlpha = 1
+  })
+  mask.g.fillStyle = MASK_PAVED
+  for (const zone of softPaved) {
+    tracePoly(mask.g, zone.points)
+    mask.g.fill()
   }
-  for (const path of PATHS) {
-    const g = color.g
-    g.save()
-    g.filter = `blur(${Math.max(1, Math.round(Math.min(2.5, path.width * 0.3) * color.k))}px)`
-    g.globalAlpha = path.alpha
-    g.strokeStyle = path.color
-    g.lineWidth = path.width
-    tracePoly(g, path.points, false)
-    g.stroke()
-    g.restore()
-  }
-  for (const lawn of LAWNS) fillRounded(lawn.points, lawn.color, MASK_GRASS, 2.2, 0.8)
+  softGroup(color, 0.7, (s) => {
+    for (const path of PATHS) {
+      s.globalAlpha = path.alpha
+      s.strokeStyle = path.color
+      s.lineWidth = path.width
+      tracePoly(s, path.points, false)
+      s.stroke()
+    }
+    s.globalAlpha = 1
+  })
+  softFill(LAWNS, MASK_GRASS, 2.2, 0.8)
   for (const points of CLAY) fillBoth((l) => tracePoly(l, points), PAINT.clay, MASK_SOIL)
 
   // kartódromo
@@ -365,7 +384,21 @@ function paintLayer(geo, region, size) {
   }
 
   // escapes e faixa asfaltada em volta da pista
-  for (const zone of RUNOFF) fillRounded(zone.points, zone.color, MASK_PAVED, 0.8, zone.soft ?? 1)
+  softFill(RUNOFF, MASK_PAVED, 0.8, 1)
+  // A câmera olha para oeste: a direita da tela é o norte. Letras de pé para ela, em metros.
+  for (const logo of LOGOS) {
+    const g = color.g
+    const c = Math.cos(logo.turn), s = Math.sin(logo.turn)
+    g.save()
+    g.transform(-s, c, c, s, logo.at[0], logo.at[1])
+    g.globalAlpha = logo.alpha ?? 0.9
+    g.fillStyle = logo.color
+    g.font = `700 ${logo.size}px ${FONT}`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(logo.text, 0, 0)
+    g.restore()
+  }
   // preenche por `evenodd` usando caminho duplo: a faixa sem cobrir o miolo
   const ring = (width, style) => {
     const outerA = []
@@ -409,6 +442,7 @@ function paintLayer(geo, region, size) {
   mask.g.fill()
   mask.g.restore()
 
+  scratch.c.width = scratch.c.height = 0
   return { color: color.c, mask: mask.c }
 }
 
@@ -477,7 +511,7 @@ void main() {
   float n3 = fbm(w * 0.1 + 3.1, 5);
   float n4 = fbm(w * 0.55 + 13.7, 4);
   float n5 = fbm(w * vec2(0.19, 0.047) + 31.0, 3);
-  float n6 = fbm(w * 2.3 + 51.0, 3);
+  float n6 = vnoise(w * 2.3 + 51.0); // grão fino: uma oitava basta, as demais nem caberiam no texel
 
   // grama: tufos escuros, áreas secas amareladas, faixas de corte paralelas à pista
   vec3 grass = c * (0.82 + 0.36 * n1);
@@ -502,7 +536,10 @@ void main() {
   float streak = fbm(vec2(dist * 0.18, along * 3.0) + 91.0, 4);
   float skid = smoothstep(0.6, 0.74, fbm(vec2(dist * 0.9, along * 5.0) + 17.0, 3)) * smoothstep(70.0, 20.0, dist);
   float worn = smoothstep(0.38, 0.72, streak) * 0.5 + smoothstep(0.55, 0.7, n3) * 0.25;
-  paint = mix(paint, mix(paint, vec3(0.03, 0.04, 0.042), worn), colored);
+  // junto à pista, a tinta passa do azul-petróleo ao verde vivo, como nas fotos do GP
+  float greenBand = smoothstep(2.5, 3.5, dist) * smoothstep(12.0, 9.0, dist);
+  vec3 tinted = mix(paint, vec3(0.05, 0.36, 0.1) * (0.8 + 0.4 * n2), greenBand * 0.85);
+  paint = mix(paint, mix(tinted, vec3(0.03, 0.04, 0.042), worn * 0.75), colored);
   paint = mix(paint, paint * vec3(1.0, 1.05, 1.02) * (0.86 + 0.32 * n6), colored * 0.8);
   paint *= 1.0 - 0.45 * skid;
 
@@ -512,7 +549,7 @@ void main() {
 }
 `
 
-function bakeLayer(renderer, geo, region, size, distField) {
+async function bakeLayer(renderer, geo, region, size, distField) {
   const { color, mask } = paintLayer(geo, region, size)
   const paint = new THREE.CanvasTexture(color)
   const maskTex = new THREE.CanvasTexture(mask)
@@ -528,7 +565,7 @@ function bakeLayer(renderer, geo, region, size, distField) {
     depthBuffer: false,
   })
   target.texture.anisotropy = 16
-  bakeToTarget(renderer, target, new THREE.ShaderMaterial({
+  await bakeInTiles(renderer, target, new THREE.ShaderMaterial({
     vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
     fragmentShader: BAKE_FRAGMENT,
     depthTest: false,
@@ -539,7 +576,7 @@ function bakeLayer(renderer, geo, region, size, distField) {
       uDist: { value: distField },
       uRegion: { value: new THREE.Vector4(region.minX, region.minY, region.maxX - region.minX, region.maxY - region.minY) },
     },
-  }))
+  }), size >= 4096 ? 8 : 4)
   paint.dispose()
   maskTex.dispose()
   color.width = color.height = 0
@@ -549,7 +586,7 @@ function bakeLayer(renderer, geo, region, size, distField) {
 
 // ------------------------------------------------------------------ material
 
-export async function createTerrain(renderer, geo, field) {
+export async function createTerrain(renderer, geo, field, { ground, around }) {
   const [grass, grassN, moss, mossN, dirt, laterite, paved, pavedN] = await Promise.all([
     loadTiled('grass_ground_diff_1k'),
     loadTiled('grass_ground_nor_gl_1k', { srgb: false }),
@@ -565,8 +602,8 @@ export async function createTerrain(renderer, geo, field) {
   const outer = { minX: area[0], maxX: area[2], minY: area[1], maxY: area[3] }
   const innerDist = trackDistanceField(inner, 1024)
   const outerDist = trackDistanceField(outer, 512)
-  const macroInner = bakeLayer(renderer, geo, inner, 4096, innerDist)
-  const macroOuter = bakeLayer(renderer, geo, outer, 2048, outerDist)
+  const macroInner = await bakeLayer(renderer, geo, inner, ground, innerDist)
+  const macroOuter = await bakeLayer(renderer, geo, outer, around, outerDist)
   innerDist.dispose()
   outerDist.dispose()
 
