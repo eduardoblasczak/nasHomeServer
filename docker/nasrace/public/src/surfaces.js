@@ -6,14 +6,14 @@
 
 const ruler = (cx, cy) => (X, Y) => [cx + (X - 960) / 3, cy - (Y - 540) / 3]
 
-const S = ruler(-60, -400)
-const SS = ruler(-60, -620)
-const M = ruler(-60, -60)
-const Nn = ruler(-60, 300)
-const E1 = ruler(250, -200)
-const E2 = ruler(250, 160)
-const NE = ruler(100, 480)
-const SE = ruler(250, -520)
+export const S = ruler(-60, -400)
+export const SS = ruler(-60, -620)
+export const M = ruler(-60, -60)
+export const Nn = ruler(-60, 300)
+export const E1 = ruler(250, -200)
+export const E2 = ruler(250, 160)
+export const NE = ruler(100, 480)
+export const SE = ruler(250, -520)
 
 const poly = (fn, ...pairs) => pairs.map(([X, Y]) => fn(X, Y))
 
@@ -106,7 +106,7 @@ export const RUNOFF = [
     color: PAINT.navy,
     points: poly(SS, [545, 250], [600, 350], [690, 420], [790, 465], [835, 430], [905, 345], [1030, 245], [990, 190], [930, 180], [880, 230], [820, 290], [760, 320], [690, 310], [630, 270], [600, 230]),
   },
-  { color: PAINT.tealDark, soft: 3, points: poly(SS, [540, 240], [600, 340], [700, 425], [800, 470], [790, 440], [700, 390], [620, 320], [575, 240]) },
+  { color: PAINT.tealDark, points: poly(SS, [540, 240], [600, 340], [700, 425], [800, 470], [790, 440], [700, 390], [620, 320], [575, 240]) },
   // saída do S, entre a pista e a saída dos boxes
   { color: PAINT.teal, points: poly(S, [960, 760], [1040, 790], [1120, 820], [1210, 860], [1180, 870], [1090, 850], [1010, 830]) },
   // Curva do Sol: faixa externa, turquesa
@@ -140,6 +140,21 @@ export const RUNOFF = [
   { color: PAINT.teal, points: poly(S, [445, 220], [510, 460], [545, 700], [520, 720], [470, 470], [420, 230]) },
   // borda clara do primeiro trecho, na saída do Café
   { color: PAINT.concrete, points: poly(NE, [460, 460], [700, 410], [880, 420], [1000, 520], [1060, 640], [1100, 640], [1100, 560], [1000, 470], [880, 390], [700, 380], [540, 430], [470, 450]) },
+]
+
+/**
+ * Marcas pintadas no asfalto das áreas de escape: texto, posição, altura das letras em metros, giro
+ * na tela (rad). Ficam de pé para a câmera, que olha para oeste. Só os projetos do servidor.
+ */
+export const LOGOS = [
+  { text: 'NASRACE', at: Nn(1432, 452), size: 15, turn: -0.62, color: '#f3f3ee' },
+  { text: 'NASRACE', at: SS(770, 395), size: 10, turn: -0.5, color: '#e9e9e4', alpha: 0.85 },
+  { text: 'DRAFT', at: SE(838, 225), size: 8.5, turn: -0.3, color: '#ffffff', alpha: 0.82 },
+  { text: 'nas-server', at: E1(925, 780), size: 7.5, turn: -0.3, color: '#ffffff', alpha: 0.8 },
+  { text: 'nasFinance', at: E2(1010, 282), size: 11, turn: 1.5, color: '#ffffff', alpha: 0.82 },
+  { text: 'nas-pulse', at: E2(560, 400), size: 8, turn: 0.95, color: '#ffffff', alpha: 0.8 },
+  { text: 'ebls.com.br', at: M(745, 700), size: 9, turn: 1.53, color: '#ffffff', alpha: 0.82 },
+  { text: 'Vô Alberto', at: Nn(1200, 735), size: 9.5, turn: 1.15, color: '#ffffff', alpha: 0.8 },
 ]
 
 /** Trilhas claras de terra e concreto no pátio: `{ color, width (m), alpha, points }`. Sem borda nítida. */
