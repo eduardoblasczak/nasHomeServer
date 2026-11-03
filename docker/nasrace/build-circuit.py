@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Gera os dados do circuito em public/interlagos/, para que o traçado, o relevo e o entorno
-da tela de Interlagos sejam os reais, e não um desenho a olho.
+Gera os dados do circuito em public/src/, para que o traçado, o relevo e o entorno do
+NasRace sejam os reais de Interlagos, e não um desenho a olho.
 
 Fontes (baixadas à mão, não ficam no repositório):
   SaoPaulo.csv        linha central e largura da pista, de 5 em 5 m
@@ -23,7 +23,7 @@ Saída:
   surroundings.bin    camadas do entorno em Int16 (decímetros)
   terrain.bin         grade de altitudes em Int16 (decímetros acima de `base`)
 
-Uso: python -I build-interlagos.py <pasta com SaoPaulo.csv, osm/ e dem/>
+Uso: python -I build-circuit.py <pasta com SaoPaulo.csv, osm/ e dem/>
 """
 
 import array
@@ -37,7 +37,7 @@ import zlib
 from pathlib import Path
 
 SRC = Path(sys.argv[1])
-OUT = Path(__file__).parent / "public" / "interlagos"
+OUT = Path(__file__).parent / "public" / "src"
 OUT.mkdir(parents=True, exist_ok=True)
 
 LAT0, LON0 = -23.7015, -46.6975
@@ -342,6 +342,7 @@ for _ in range(8):
 named = []
 for w in racing:
     name = tags(w).get("name")
+    name = {"Pinherinho": "Pinheirinho"}.get(name, name)  # grafia errada no mapa de origem
     if not name or name == "Arquibancadas":
         continue
     g = proj(w["geometry"])
@@ -458,7 +459,7 @@ data = {
     "layers": index,
 }
 header = (
-    "// Gerado por build-interlagos.py. Não editar à mão.\n"
+    "// Gerado por build-circuit.py. Não editar à mão.\n"
     "// Pista: TUMFTM/racetrack-database (LGPL-3.0). Entorno: © colaboradores do OpenStreetMap (ODbL).\n"
     "// Relevo: dados SRTM, cortesia do U.S. Geological Survey, via Terrain Tiles.\n"
 )
