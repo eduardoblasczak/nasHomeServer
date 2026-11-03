@@ -1,11 +1,14 @@
 # nas-pulse — métricas por container para o mapa do servidor
 
-Alimenta o modo **Servidor** do [Agent Arena](../../tools/agent-arena/README.md):
-CPU, memória, rede e reinícios de cada container, mais os números do host.
+Alimenta o modo **Servidor** do [Agent Arena](../../tools/agent-arena/README.md) e o
+[NasRace](../nasrace/README.md): CPU, memória, rede e reinícios de cada container, mais
+os números do host.
 
 A telemetria pública do portfólio entrega só "no ar / fora" por container, de
 propósito, porque o detalhe desenha o mapa interno da stack. Este serviço
-entrega o detalhe, mas só para a tailnet.
+entrega o detalhe, mas só para a tailnet. A exceção é o `/api/race`, que o
+NasRace, público, encaminha: tem os containers e os números que aquela tela
+mostra, sem o resto do host.
 
 ```
 Arena (Windows) ── tailnet ──► tailscale serve :9106 ──► 127.0.0.1:9106 ──► nas-pulse ──► prometheus
@@ -15,7 +18,7 @@ Arena (Windows) ── tailnet ──► tailscale serve :9106 ──► 127.0.0
 | :--- | :--- |
 | Caminho no servidor | `/data/nas-pulse` |
 | Porta | `9106`, presa em `127.0.0.1`, publicada na tailnet pelo `tailscale serve` |
-| Endpoint | `GET /api/pulse`, `GET /healthz` |
+| Endpoint | `GET /api/pulse`, `GET /api/race`, `GET /healthz` |
 | Dados | Só o Prometheus. **Sem** socket do Docker |
 | Hardening | usuário 10002, `read_only`, `cap_drop: ALL`, `no-new-privileges`, 64 MiB |
 
