@@ -1,0 +1,7 @@
+# Roda no nas-server (Linux). Com core.autocrlf=true, o checkout no
+# Windows converteria para CRLF e o nginx leria o .conf com \r.
+* text=auto eol=lf
+*.jpg binary
+*.bin binary
+*.woff2 binary
+*.webp binary

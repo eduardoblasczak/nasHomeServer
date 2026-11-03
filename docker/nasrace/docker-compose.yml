@@ -1,0 +1,61 @@
+# =============================================================
+# NasRace — os containers do nas-server correndo em Interlagos
+# =============================================================
+# Sobe com:
+#   cd ~/nasrace
+#   docker compose up -d
+#
+# Exposição: público em https://ebls.com.br/nasrace/, pelo Cloudflare
+# Tunnel. A porta fica presa à rede interna do Docker, como no portfólio,
+# e o túnel só encaminha para cá os caminhos que começam com /nasrace.
+# =============================================================
+
+services:
+  nasrace:
+    image: nginxinc/nginx-unprivileged:stable-alpine
+    container_name: nasrace
+    restart: unless-stopped
+
+    # Volume em vez de imagem própria: atualizar o site não gera camadas novas no disco
+    # do Docker, que é o menor deste servidor. Quem desenha é a placa de vídeo do navegador.
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./public:/usr/share/nginx/html:ro
+
+    ports:
+      - "172.17.0.1:9107:8080"
+
+    # A rede onde está o nas-pulse. O nginx só encaminha /api/pulse.
+    networks:
+      - monitoring
+
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    deploy:
+      resources:
+        limits:
+          memory: 48M
+
+    healthcheck:
+      test: ['CMD', 'wget', '-qO', '/dev/null', 'http://127.0.0.1:8080/healthz']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+
+networks:
+  monitoring:
+    external: true
+    name: monitoring_default
