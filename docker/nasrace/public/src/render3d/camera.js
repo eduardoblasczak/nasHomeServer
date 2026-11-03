@@ -26,6 +26,7 @@ export function createCameraRig(canvas, heightAt) {
     fitTarget: new THREE.Vector3(0, focusHeight, 0),
     follow: null,
     interacted: false,
+    azimuth: AZIMUTH,
   }
   const ray = new THREE.Raycaster()
   const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), -focusHeight)
@@ -43,9 +44,9 @@ export function createCameraRig(canvas, heightAt) {
     return PITCH_NEAR + (PITCH_FAR - PITCH_NEAR) * t
   }
 
-  const place = (cam, target, distance, pitch) => {
+  const place = (cam, target, distance, pitch, azimuth = AZIMUTH) => {
     const cp = Math.cos(pitch), sp = Math.sin(pitch)
-    cam.position.set(target.x - Math.cos(AZIMUTH) * cp * distance, target.y + sp * distance, target.z - Math.sin(AZIMUTH) * cp * distance)
+    cam.position.set(target.x - Math.cos(azimuth) * cp * distance, target.y + sp * distance, target.z - Math.sin(azimuth) * cp * distance)
     cam.up.set(0, 1, 0)
     cam.lookAt(target)
     cam.near = Math.max(1, distance * 0.08)
@@ -128,33 +129,60 @@ export function createCameraRig(canvas, heightAt) {
     state.goal.z = THREE.MathUtils.clamp(state.goal.z, area.z - room, area.z + room)
   }
 
-  canvas.addEventListener('wheel', (event) => {
-    event.preventDefault()
+  /** Aproxima em volta de um ponto da tela, para ele ficar parado sob o mouse ou os dedos. */
+  const zoomAt = (ndc, factor) => {
     state.interacted = true
     state.follow = null
-    const ndc = toNdc(event)
     state.goal.y = goalHeight(state.goal.x, state.goal.z, state.goalDistance)
     ground.constant = -state.goal.y
     placeProbe(state.goal, state.goalDistance)
     const before = groundUnder(ndc, probe)
-    const factor = Math.exp(THREE.MathUtils.clamp(event.deltaY, -240, 240) * 0.0018)
     state.goalDistance = THREE.MathUtils.clamp(state.goalDistance * factor, MIN_DISTANCE, state.fitDistance)
     placeProbe(state.goal, state.goalDistance)
     const after = groundUnder(ndc, probe)
     if (before && after) state.goal.add(before.sub(after))
     if (state.goalDistance >= state.fitDistance * 0.999) state.goal.copy(state.fitTarget)
     clampGoal()
+  }
+
+  canvas.addEventListener('wheel', (event) => {
+    event.preventDefault()
+    zoomAt(toNdc(event), Math.exp(THREE.MathUtils.clamp(event.deltaY, -240, 240) * 0.0018))
   }, { passive: false })
 
   let dragging = null
-  canvas.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return
+  const startDrag = (at) => {
     ground.constant = -state.goal.y
     placeProbe(state.goal, state.goalDistance)
-    dragging = { start: groundUnder(toNdc(event), probe), moved: false, x: event.clientX, y: event.clientY }
+    dragging = { start: groundUnder(toNdc(at), probe), moved: false, x: at.clientX, y: at.clientY }
+  }
+  // Dedos na tela: com dois, a distância entre eles comanda a aproximação.
+  const fingers = new Map()
+  const fingerGap = () => {
+    const [a, b] = fingers.values()
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+  }
+  let pinch = 0
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return
     canvas.setPointerCapture(event.pointerId)
+    fingers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY })
+    if (fingers.size === 2) {
+      dragging = null
+      pinch = fingerGap()
+    } else if (fingers.size === 1) {
+      startDrag(event)
+    }
   })
   canvas.addEventListener('pointermove', (event) => {
+    if (fingers.has(event.pointerId)) fingers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY })
+    if (fingers.size >= 2) {
+      const [a, b] = fingers.values()
+      const gap = fingerGap()
+      if (gap > 0 && pinch > 0) zoomAt(toNdc({ clientX: (a.clientX + b.clientX) / 2, clientY: (a.clientY + b.clientY) / 2 }), pinch / gap)
+      pinch = gap
+      return
+    }
     if (!dragging?.start) return
     if (!dragging.moved && Math.hypot(event.clientX - dragging.x, event.clientY - dragging.y) < 4) return
     dragging.moved = true
@@ -167,9 +195,14 @@ export function createCameraRig(canvas, heightAt) {
       clampGoal()
     }
   })
-  canvas.addEventListener('pointerup', () => {
+  const release = (event) => {
+    fingers.delete(event.pointerId)
     dragging = null
-  })
+    // o dedo que ficou continua arrastando de onde está
+    if (fingers.size === 1) startDrag([...fingers.values()][0])
+  }
+  canvas.addEventListener('pointerup', release)
+  canvas.addEventListener('pointercancel', release)
   canvas.addEventListener('dblclick', () => reset())
 
   function reset() {
@@ -187,25 +220,31 @@ export function createCameraRig(canvas, heightAt) {
     follow(car) {
       state.interacted = true
       state.follow = car
-      if (car) state.goalDistance = Math.min(state.goalDistance, 210)
+      if (car) state.goalDistance = Math.min(state.goalDistance, 150)
     },
     pixelsPerMetre(heightPx) {
       const dist = camera.position.distanceTo(state.target)
       return heightPx / (2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)) * dist)
     },
     update(dt, aspect) {
+      const rate = state.follow ? 5 : 9
       if (state.follow) {
-        state.goal.x = state.follow.x
-        state.goal.z = -state.follow.y
+        // Mira à frente do carro: a suavização deixaria a câmera atrás dele, e de perto ele sairia do quadro.
+        const lead = (state.follow.speed ?? 0) / rate
+        state.goal.x = state.follow.x + Math.cos(state.follow.heading) * lead
+        state.goal.z = -(state.follow.y + Math.sin(state.follow.heading) * lead)
       }
       state.goal.y = state.follow ? state.follow.z : goalHeight(state.goal.x, state.goal.z, state.goalDistance)
-      const rate = state.follow ? 5 : 9
       state.distance = Math.exp(damp(Math.log(state.distance), Math.log(state.goalDistance), rate, dt))
       state.target.x = damp(state.target.x, state.goal.x, rate, dt)
       state.target.y = damp(state.target.y, state.goal.y, rate, dt)
       state.target.z = damp(state.target.z, state.goal.z, rate, dt)
       camera.aspect = aspect
-      place(camera, state.target, state.distance, pitchFor(state.distance))
+      // O prédio dos boxes fica entre a câmera e o pit lane: seguindo um carro parado ali, ela
+      // dá a volta e olha da reta para as garagens. Ao sair do box, volta sozinha.
+      const inBox = state.follow?.state === 'inPit' && state.follow.speed < 8
+      state.azimuth = damp(state.azimuth, inBox ? 0.42 : AZIMUTH, 1.8, dt)
+      place(camera, state.target, state.distance, pitchFor(state.distance), state.azimuth)
     },
     /** Tudo parado? Permite o teste automático fotografar uma vista exata. */
     jump(x, y, distance) {
