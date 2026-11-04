@@ -114,13 +114,21 @@ export function addBuildings(kit, geo, field, skip, { simple = false } = {}) {
     const r = rand()
     const height = declared > 0 ? declared : size > 1500 ? 9 + r * 7 : size > 400 ? 6 + r * 6 : size > 120 ? 3.6 + r * 5 : 3 + r * 3.2
     const ground = field.heightAt(cx, cy) - 1
-    const top = ground + 1 + height
+    // Em andares inteiros: assim o telhado nunca corta uma fileira de janelas.
+    const top = ground + 1 + Math.max(1, Math.round(height / 3)) * 3 - 0.1
     const seed = rand()
 
     // sentido anti-horário visto de cima, para as paredes olharem para fora
     const ring = []
     if (area > 0) for (let i = 0; i < n; i++) ring.push([pts[i * 2], pts[i * 2 + 1]])
     else for (let i = n - 1; i >= 0; i--) ring.push([pts[i * 2], pts[i * 2 + 1]])
+    // Plantas vizinhas costumam dividir parede. Dois centímetros de diferença entre uma e outra evitam
+    // o chuvisco de duas faces disputando o mesmo plano.
+    const shrink = 1 - (0.012 + rand() * 0.03) / Math.max(2, Math.sqrt(size) / 2)
+    for (const p of ring) {
+      p[0] = cx + (p[0] - cx) * shrink
+      p[1] = cy + (p[1] - cy) * shrink
+    }
 
     const shade = 0.9 + rand() * 0.2
     const wall = rgb(WALLS[Math.floor(rand() * WALLS.length)], shade)
@@ -219,7 +227,7 @@ export function addBuildings(kit, geo, field, skip, { simple = false } = {}) {
 
 // ------------------------------------------------------------------ árvores
 
-function pointInPolygon(pts, x, y) {
+export function pointInPolygon(pts, x, y) {
   let c = false
   const n = pts.length / 2
   for (let a = 0, b = n - 1; a < n; b = a++) {
@@ -328,7 +336,13 @@ export function buildTrees(geo, field, leafTexture, extraBlocks = [], { simple =
       cy += pts[i * 2 + 1]
     }
     const b = bbox(pts)
-    block(cx / n, cy / n, Math.max(b.maxX - b.minX, b.maxY - b.minY) * 0.45)
+    block(cx / n, cy / n, Math.min(b.maxX - b.minX, b.maxY - b.minY) * 0.45)
+    // planta em L ou comprida escapa do círculo: confere célula por célula, com folga de meia célula
+    for (let y = b.minY - CELL / 2; y <= b.maxY + CELL / 2; y += CELL / 2) {
+      for (let x = b.minX - CELL / 2; x <= b.maxX + CELL / 2; x += CELL / 2) {
+        if (pointInPolygon(pts, x, y)) block(x, y, CELL / 2)
+      }
+    }
   }
   for (const { prop: width, pts } of geo.layers.roads) {
     for (let i = 0; i < pts.length - 2; i += 2) {
