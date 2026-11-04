@@ -63,7 +63,18 @@ e uma correção demoraria horas a chegar a quem já abriu a tela.
 **Aparelho fraco abre mais leve.** Chão e sombras são cozidos uma vez, ao abrir, e o ajuste automático
 de qualidade não devolve essa memória depois. Toque, placa integrada, até 4 GB de memória ou textura
 máxima abaixo de 8192 usam a carga leve: um quarto da memória nessas texturas, e 1,7 milhão de
-triângulos em vez de 2,9. Placa simulada por software ou sem HDR vai direto para o 2D.
+triângulos em vez de 3 na vista geral. Placa simulada por software ou sem HDR vai direto para o 2D.
+
+**Gente em malha, só de perto.** São cerca de 36 mil pessoas, em grupos por área, para a câmera descartar
+o que está fora da tela. Abaixo de 100 m elas têm braços, pernas e cabeça; até 420 m, uma forma mais
+simples; acima disso, saem de cena e o acabamento das cadeiras desenha um pontilhado no lugar, o que
+mantém a vista geral leve. Quem está no chão tem uma sombra à parte, porque a sombra do sol é cozida
+uma vez só e não acompanharia quem anda. Uma grade de 2 m guarda o que ocupa o chão: ninguém nasce nem
+anda dentro de prédio, caminhão ou tenda, e o caminho acompanha a inclinação do terreno. Todos os
+movimentos vêm do relógio do shader: com as animações do sistema desligadas, todo mundo fica parado.
+
+**Prédios em andares inteiros.** A altura de cada prédio é arredondada para múltiplos de 3 m. Assim o
+telhado nunca corta uma fileira de janelas, que são pintadas no shader.
 
 **Volume em vez de imagem própria.** Atualizar o site não gera camadas novas no disco do Docker, que é
 o menor deste servidor. O servidor só entrega arquivos: quem desenha é a placa de vídeo do navegador.
@@ -92,7 +103,9 @@ paradas. É o único desvio proposital do mapa.
 - `race.js`: as regras, sem nenhum desenho. `feed.js`: leitura do `nas-pulse`.
 - `venue.js`: onde ficam arquibancadas, tendas e barreiras. `surfaces.js`: áreas de escape e pátio.
 - `ui.js`: torre, cartão do carro e mensagens, em HTML.
-- `render3d/`: `terrain`, `track`, `scenery`, `gp`, `brands`, `carmodel`, `cars`, `camera`, `post`.
+- `render3d/`: `terrain`, `track`, `scenery`, `gp`, `brands`, `carmodel`, `cars`, `camera`, `post`, mais as peças
+  do autódromo: `stands` (arquibancadas), `pitlane` (boxes e torre de controle), `paddock` (caminhões,
+  motorhomes, tendas e carros) e `people`. `kit` é o construtor de malhas e o material delas.
 - `render2d.js`: reserva para quem não tem WebGL2 ou depois de falhas repetidas do 3D.
 
 ## Fontes e licenças
@@ -114,11 +127,12 @@ a imagem em si não é usada. `build-circuit.py` regenera os dados: as fontes e 
 ## Desempenho
 
 A sombra, o chão e o céu são cozidos uma vez ao abrir, então cada quadro só lê texturas. Numa RTX 3050
-em 1920x1080, sem limite de quadros: 261 a 610 quadros por segundo, com a GPU entre 1,8 e 3,5 ms por quadro.
-O limite para 144 Hz é de 6,9 ms.
+em 1920x1080, sem limite de quadros: de 245 a mais de 500 quadros por segundo, conforme a vista, com a GPU entre 2 e 4,1 ms por quadro.
+O limite para 144 Hz é de 6,9 ms. Para medir, feche as outras abas com a tela aberta: elas disputam a
+mesma placa e derrubam o número. A primeira medida logo depois de abrir também sai baixa.
 
 No celular simulado (toque, tela de 390 px e CPU 4x mais lenta, ainda com a GPU do PC), a tela abre em
-32 a 36 s. Isso mede memória, tempo de abertura e lógica. O desempenho em um celular de verdade não foi
+27 a 36 s. Isso mede memória, tempo de abertura e lógica. O desempenho em um celular de verdade não foi
 medido: `?fps` mostra os números no próprio aparelho.
 
 Abaixo de 55 quadros por segundo, e se o tempo de desenho for o culpado, a tela desce sozinha um dos
