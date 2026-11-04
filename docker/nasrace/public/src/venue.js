@@ -73,7 +73,7 @@ export const MASTS = [
 const tent = (fn, X, Y, length, width, angle, color = '#eceded') => ({ ...fromRuler(fn, X, Y), length, width, angle, color })
 export const TENTS = [
   // ao longo da estrada de serviço, por fora do Sol
-  tent(SE, 960, 320, 46, 12, 1.2), tent(SE, 1005, 420, 26, 13, 1.25), tent(SE, 1020, 395, 13, 11, 1.25, '#dfe0e0'),
+  tent(SE, 1005, 420, 26, 13, 1.25), tent(SE, 1020, 395, 13, 11, 1.25, '#dfe0e0'),
   tent(SE, 935, 225, 14, 10, 1.25, '#233f9e'), tent(SE, 905, 290, 14, 9, 1.25, '#1e2a5c'), tent(SE, 1140, 290, 44, 18, -0.08),
   tent(SE, 1040, 305, 15, 9, 0.2, '#dfe0e0'),
   // pátio do paddock
