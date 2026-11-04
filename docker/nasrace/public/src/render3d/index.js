@@ -11,6 +11,7 @@ import { createCameraRig } from './camera.js'
 import { createCars } from './cars.js'
 import { addGrandPrix, createFlags, createPitBoards, createScreens, createStartLights } from './gp.js'
 import { KitBuilder, kitMesh } from './kit.js'
+import { createPeople } from './people.js'
 import { createPost } from './post.js'
 import { addBuildings, addTanks, buildTrees, buildWater } from './scenery.js'
 import { buildHeightField, createTerrain } from './terrain.js'
@@ -242,13 +243,15 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
     return Math.hypot(x / n - PADDOCK_CENTER[0], y / n - PADDOCK_CENTER[1]) < 8
   })?.pts
   const venue = new KitBuilder(600_000)
-  const gp = addGrandPrix(venue, field, { paddock })
+  const gp = addGrandPrix(venue, field, { geo, paddock, simple: load.simple })
   const screens = createScreens(field, venue)
   scene.add(kitMesh(venue, { ...kitOptions, variant: 'venue' }))
   scene.add(gp.fence, screens.mesh)
   const pitBoards = createPitBoards(gp.pit)
   scene.add(pitBoards.mesh)
   scene.add(createFlags(gp.flags, seeded(77)))
+  const people = createPeople({ seated: gp.people.seated, ground: gp.people.ground, sun: SUN, simple: load.simple })
+  scene.add(people.group)
 
   // Árvore não nasce em cima do que foi montado para o GP.
   const occupied = [
@@ -415,6 +418,7 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
     const ppm = rig.pixelsPerMetre(view.cssH)
     const scale = THREE.MathUtils.clamp(19 / (5.6 * ppm), 1, 3.4)
     trees.update(ppm > 2.2, rig.state.target, quality.treeRadius)
+    people.update(rig.state.distance)
     pitBoards.update(race.cars)
     screens.update(race.cars, MODES[race.mode].title, performance.now())
     hovered = focusCar
@@ -471,6 +475,8 @@ export async function createRenderer3D({ canvas, stage, geo, onProgress, onHover
 
   return {
     frame,
+    scene,
+    heightAt: field.heightAt,
     rig,
     renderer,
     view,
