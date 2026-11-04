@@ -11,7 +11,7 @@ const BLACK = [0, 0, 0.007, 0.62]
 const WHITE = [0, 0, 0.72, 0.3]
 const GLOW = [0, 0, 0.5, 0.4]
 
-class MeshParts {
+export class MeshParts {
   constructor() {
     this.position = []
     this.normal = []

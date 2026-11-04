@@ -48,7 +48,12 @@ export const shared = {
   uCloudOffset: { value: new THREE.Vector2() },
   uTime: { value: 0 },
   uWet: { value: 0 },
+  uCrowd: { value: 0 },
 }
+
+// A sombra do Three espalha as amostras com um ruído por pixel, que vira chuvisco nas paredes onde
+// a sombra termina. Um giro fixo troca isso por uma borda lisa.
+THREE.ShaderChunk.shadowmap_pars_fragment = THREE.ShaderChunk.shadowmap_pars_fragment.replaceAll('interleavedGradientNoise( gl_FragCoord.xy ) * PI2', '0.7')
 
 const ATMOS_VERTEX_HEAD = /* glsl */ `
 varying vec3 vWPos;
@@ -80,7 +85,8 @@ const ATMOS_FRAGMENT_LIGHT = /* glsl */ `
 
 /**
  * Prepara um material do Three: posição no mundo, sombra de nuvens e os trechos próprios de
- * shader. `patch.fragment` é [[trecho original, substituto], ...], `patch.uniforms` são extras.
+ * shader. `patch.fragment` e `patch.vertex` são [[trecho original, substituto], ...], `patch.uniforms`
+ * são extras.
  */
 export function atmospheric(material, patch = {}) {
   const key = patch.key ?? material.type
@@ -90,6 +96,10 @@ export function atmospheric(material, patch = {}) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\n${ATMOS_VERTEX_HEAD}\n${patch.vertexHead ?? ''}`)
       .replace('#include <project_vertex>', `#include <project_vertex>\n${ATMOS_VERTEX_BODY}\n${patch.vertexBody ?? ''}`)
+    for (const [from, to] of patch.vertex ?? []) {
+      if (!shader.vertexShader.includes(from)) console.warn('trecho de shader não encontrado:', from)
+      shader.vertexShader = shader.vertexShader.replace(from, to)
+    }
     let fragment = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${ATMOS_FRAGMENT_HEAD}\n${patch.fragmentHead ?? ''}`)
       .replace('#include <aomap_fragment>', ATMOS_FRAGMENT_LIGHT)
