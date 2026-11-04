@@ -16,6 +16,10 @@ Mesmas decisões da telemetria do portfólio:
 Reinícios sem socket: o cAdvisor expõe `container_start_time_seconds`.
 Quando esse número aumenta, o container reiniciou — o cliente compara
 leituras consecutivas.
+
+A exceção à tailnet é o NasRace, publicado por decisão consciente: o nginx
+dele encaminha só `/api/race`, que traz os containers e os números que a
+tela mostra, sem o resto do host (uptime, carga, sinal do WiFi, rede).
 """
 
 import json
@@ -194,6 +198,19 @@ def cached():
     return None
 
 
+def race_view(payload):
+    """Só o que a tela pública do NasRace mostra."""
+    host_data = payload["host"]
+    return {
+        "host": {
+            **{k: host_data[k] for k in ("cpuPercent", "ramPercent", "swapPercent", "cpuTemp") if k in host_data},
+            "disks": [{"mount": d["mount"], "usedPercent": d["usedPercent"]} for d in host_data.get("disks", [])],
+        },
+        "containers": payload["containers"],
+        "generatedAt": payload["generatedAt"],
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "nas-pulse"
@@ -211,12 +228,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
-        if path in ("/", "/api/pulse"):
+        if path in ("/", "/api/pulse", "/api/race"):
             payload = cached()
             if payload is None:
                 self._send(503, json.dumps({"error": "prometheus unreachable"}))
                 return
-            self._send(200, json.dumps(payload))
+            self._send(200, json.dumps(race_view(payload) if path == "/api/race" else payload))
             return
         if path == "/healthz":
             self._send(200, "ok", "text/plain; charset=utf-8")
