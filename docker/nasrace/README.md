@@ -131,6 +131,11 @@ em 1920x1080, sem limite de quadros: de 245 a mais de 500 quadros por segundo, c
 O limite para 144 Hz é de 6,9 ms. Para medir, feche as outras abas com a tela aberta: elas disputam a
 mesma placa e derrubam o número. A primeira medida logo depois de abrir também sai baixa.
 
+Pelo endereço público, um navegador sem nada guardado abre a tela em cerca de 20 s, e a segunda visita em
+11 s. Isso vale com os arquivos no cache da Cloudflare, que dura 1 dia e é separado por região. Fora dele,
+os 9 MB vêm pelo WiFi do servidor: medido em 2026-11-03, o upload deu 0,7 MB/s, e uma abertura num
+momento ruim da rede passou de 2 minutos.
+
 No celular simulado (toque, tela de 390 px e CPU 4x mais lenta, ainda com a GPU do PC), a tela abre em
 27 a 36 s. Isso mede memória, tempo de abertura e lógica. O desempenho em um celular de verdade não foi
 medido: `?fps` mostra os números no próprio aparelho.
