@@ -21,6 +21,7 @@ aplicação. Este arquivo documenta só como ele se encaixa na infraestrutura.
 | Porta local | `8093` (container `voalberto-site`, porta interna 8080) |
 | Exposição | Cloudflare Tunnel → `HTTP 172.17.0.1:8093` |
 | Hostname | `voalberto.com.br` e `www.voalberto.com.br` (www redireciona) |
+| Endereço de hoje | `https://ebls.com.br/voalberto`, até o dono trocar os nameservers. No túnel, a regra de caminho `^/voalberto` precisa vir antes da regra geral do `ebls.com.br`: a primeira que casa vence |
 | DNS | Domínio no Registro.br, com nameservers apontando para a Cloudflare |
 | Imagem | `voalberto-site:latest` (`nginxinc/nginx-unprivileged`, sem root) |
 | Volumes | Nenhum — o site inteiro está dentro da imagem |
