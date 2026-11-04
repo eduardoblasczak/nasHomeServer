@@ -4,6 +4,7 @@
 
 import { at, CIRCUIT, N, P, PIT, STEP } from '../circuit.js'
 import { CLAY, LAWNS, LOGOS, PAINT, PATCHES, PATHS, PAVED, RUNOFF, SITE } from '../surfaces.js'
+import { HOSPITALITY, TENTS, TRUCKS } from '../venue.js'
 import { FONT } from './brands.js'
 import { atmospheric, bakeInTiles, loadTiled, NOISE_GLSL, seeded, smoothstep, THREE } from './common.js'
 
@@ -439,6 +440,16 @@ function paintLayer(geo, region, size) {
   mask.g.beginPath()
   for (const { pts } of geo.layers.buildings) traceFlat(mask.g, pts)
   for (const { pts } of geo.layers.stands) traceFlat(mask.g, pts)
+  const block = (x, y, angle, x0, x1, halfW) => {
+    const c = Math.cos(angle), s = Math.sin(angle)
+    const corner = (lx, lz) => [x + lx * c + lz * s, y + lx * s - lz * c]
+    const points = [corner(x0, -halfW), corner(x1, -halfW), corner(x1, halfW), corner(x0, halfW)]
+    points.forEach(([px, py], i) => (i ? mask.g.lineTo(px, py) : mask.g.moveTo(px, py)))
+    mask.g.closePath()
+  }
+  for (const t of TRUCKS) block(t.x, t.y, t.angle, -8.6, 11, 1.5)
+  for (const h of HOSPITALITY) block(h.x, h.y, h.angle, -8, 8, 5.2)
+  for (const t of TENTS) block(t.x, t.y, t.angle, -t.length / 2, t.length / 2, t.width / 2 + 0.3)
   mask.g.fill()
   mask.g.restore()
 
