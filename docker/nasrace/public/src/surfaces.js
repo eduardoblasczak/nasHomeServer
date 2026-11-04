@@ -22,6 +22,7 @@ const poly = (fn, ...pairs) => pairs.map(([X, Y]) => fn(X, Y))
 export const PAINT = {
   grass: '#76824c',
   grassBright: '#4f7c3d',
+  lawn: '#677f4a',
   grassDry: '#a69c66',
   straw: '#b5a873',
   soilRed: '#a4633c',
@@ -202,7 +203,7 @@ export const LAWNS = [
     poly(M, [1100, 980], [1240, 870], [1160, 1010]),
     poly(M, [1170, 1040], [1225, 950], [1260, 1060]),
     poly(M, [1270, 1000], [1330, 925], [1300, 1060]),
-  ].map((points) => ({ color: PAINT.grassBright, points })),
+  ].map((points) => ({ color: PAINT.lawn, points })),
   // gramado claro entre o S e a arquibancada do sul
   { color: PAINT.grassBright, points: poly(SS, [1020, 300], [1240, 310], [1500, 280], [1640, 170], [1700, 90], [1720, 150], [1600, 280], [1440, 330], [1240, 345], [1040, 335]) },
   { color: PAINT.grassBright, points: poly(SS, [965, 360], [1050, 340], [1250, 395], [1450, 390], [1650, 300], [1800, 110], [1820, 180], [1680, 340], [1450, 420], [1200, 430], [1000, 410]) },
